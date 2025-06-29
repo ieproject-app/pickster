@@ -3,797 +3,652 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Random Name Picker</title>
+    <title>Pickster - Pemilih Nama Acak</title>
+    
+    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    
+    <!-- Alpine.js CDN (with defer) -->
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+    
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+    <!-- Custom Styles -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        
+        /* Animation for confetti */
+        @keyframes fall {
+            0% { transform: translateY(-100px) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+        }
+        .confetti {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            animation: fall 5s linear forwards;
+            top: -20px;
+        }
+    </style>
+
+    <!-- Alpine.js Application Logic -->
     <script>
-        document.addEventListener('alpine:init', () => {
-            Alpine.data('picksterApp', () => ({
-                // State & Properti Inti
+        function picksterApp() {
+            return {
+                // --- STATE & PROPERTIES ---
+
+                // 1. Name Data
                 namesInput: '',
                 allNames: [],
                 availableNames: [],
                 winners: [],
                 lastWinners: [],
-                selectionHistory: {},
                 
-                // Pengaturan
+                // 2. Settings
                 numWinners: 1,
                 shuffleDuration: 3,
                 countdownDuration: 3,
                 removeAfterPicking: true,
                 
-                // State UI
+                // 3. UI State
                 isPicking: false,
                 isCountingDown: false,
                 countdownValue: 3,
+                shufflingName: '',
                 showConfetti: false,
                 isSoundEnabled: true,
                 isHistorySheetOpen: false,
                 isPresentationMode: false,
+                activeTab: 'input', // 'input' or 'groups'
+                isSettingsOpen: true,
+                isActionsMenuOpen: false,
                 
-                // Grup
+                // 4. Groups
                 savedGroups: {},
                 activeGroup: null,
                 newGroupName: '',
-                groupTab: 'current', // 'current' atau 'groups'
-                
-                // Inisialisasi
+
+                // 5. Audio
+                audioContext: null,
+
+                // --- INITIALIZATION ---
                 init() {
-                    // Muat state dari localStorage jika tersedia
-                    if (localStorage.getItem('picksterState')) {
-                        const savedState = JSON.parse(localStorage.getItem('picksterState'));
-                        
-                        this.allNames = savedState.allNames || [];
-                        this.availableNames = savedState.availableNames || [];
-                        this.winners = savedState.winners || [];
-                        this.lastWinners = savedState.lastWinners || [];
-                        this.selectionHistory = savedState.selectionHistory || {};
-                        
-                        this.numWinners = savedState.numWinners || 1;
-                        this.shuffleDuration = savedState.shuffleDuration || 3;
-                        this.countdownDuration = savedState.countdownDuration || 3;
-                        this.removeAfterPicking = savedState.removeAfterPicking !== undefined ? savedState.removeAfterPicking : true;
-                        
-                        this.savedGroups = savedState.savedGroups || {};
-                        this.activeGroup = savedState.activeGroup || null;
-                        this.isSoundEnabled = savedState.isSoundEnabled !== undefined ? savedState.isSoundEnabled : true;
-                    }
-                    
-                    // Atur namesInput untuk grup yang aktif
-                    if (this.activeGroup && this.savedGroups[this.activeGroup]) {
-                        this.namesInput = this.savedGroups[this.activeGroup].join('\n');
-                    }
-                    
-                    // Buat AudioContext untuk efek suara
+                    console.log('Pickster App Initializing...');
+                    this.loadStateFromLocalStorage();
                     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+                    // Watch for state changes to save them automatically
+                    this.$watch('allNames', () => this.saveStateToLocalStorage('names'));
+                    this.$watch('winners', () => this.saveStateToLocalStorage('winners'));
+                    this.$watch('savedGroups', () => this.saveStateToLocalStorage('groups'));
+                    this.$watch('numWinners', () => this.saveStateToLocalStorage('settings'));
+                    this.$watch('shuffleDuration', () => this.saveStateToLocalStorage('settings'));
+                    this.$watch('countdownDuration', () => this.saveStateToLocalStorage('settings'));
+                    this.$watch('removeAfterPicking', () => this.saveStateToLocalStorage('settings'));
+
+                    // Handle fullscreen changes
+                    document.addEventListener('fullscreenchange', () => {
+                        if (!document.fullscreenElement) {
+                            this.isPresentationMode = false;
+                        }
+                    });
                 },
-                
-                // Simpan state ke localStorage
-                saveStateToLocalStorage() {
-                    const state = {
-                        allNames: this.allNames,
-                        availableNames: this.availableNames,
-                        winners: this.winners,
-                        lastWinners: this.lastWinners,
-                        selectionHistory: this.selectionHistory,
-                        
-                        numWinners: this.numWinners,
-                        shuffleDuration: this.shuffleDuration,
-                        countdownDuration: this.countdownDuration,
-                        removeAfterPicking: this.removeAfterPicking,
-                        
-                        savedGroups: this.savedGroups,
-                        activeGroup: this.activeGroup,
-                        isSoundEnabled: this.isSoundEnabled
-                    };
+
+                // --- DATA PERSISTENCE ---
+                loadStateFromLocalStorage() {
+                    const settings = JSON.parse(localStorage.getItem('pickster_settings'));
+                    if (settings) {
+                        this.numWinners = settings.numWinners ?? 1;
+                        this.shuffleDuration = settings.shuffleDuration ?? 3;
+                        this.countdownDuration = settings.countdownDuration ?? 3;
+                        this.removeAfterPicking = settings.removeAfterPicking ?? true;
+                    }
+
+                    this.allNames = JSON.parse(localStorage.getItem('pickster_names')) || [];
+                    this.winners = JSON.parse(localStorage.getItem('pickster_winners')) || [];
+                    this.savedGroups = JSON.parse(localStorage.getItem('pickster_groups')) || {};
                     
-                    localStorage.setItem('picksterState', JSON.stringify(state));
+                    this.resetAvailableNames();
                 },
-                
-                // Handle set names dari textarea
+                saveStateToLocalStorage(key) {
+                    try {
+                        if (key === 'names') localStorage.setItem('pickster_names', JSON.stringify(this.allNames));
+                        if (key === 'winners') localStorage.setItem('pickster_winners', JSON.stringify(this.winners));
+                        if (key === 'groups') localStorage.setItem('pickster_groups', JSON.stringify(this.savedGroups));
+                        if (key === 'settings') {
+                             localStorage.setItem('pickster_settings', JSON.stringify({
+                                numWinners: this.numWinners,
+                                shuffleDuration: this.shuffleDuration,
+                                countdownDuration: this.countdownDuration,
+                                removeAfterPicking: this.removeAfterPicking
+                            }));
+                        }
+                    } catch (e) {
+                        console.error("Gagal menyimpan ke localStorage:", e);
+                    }
+                },
+
+                // --- CORE METHODS ---
                 handleSetNames() {
-                    // Bersihkan dan proses input
-                    const names = this.namesInput
-                        .split('\n')
-                        .map(name => name.trim())
-                        .filter(name => name !== '');
-                    
-                    // Hapus duplikat
-                    const uniqueNames = [...new Set(names)];
-                    
-                    this.allNames = uniqueNames;
-                    this.availableNames = [...uniqueNames];
+                    if (!this.namesInput.trim()) {
+                        this.allNames = [];
+                    } else {
+                        const names = this.namesInput.split('\n')
+                            .map(name => name.trim())
+                            .filter(name => name !== '');
+                        this.allNames = [...new Set(names)]; // Remove duplicates
+                    }
+                    this.activeGroup = null;
+                    this.resetAllWinners();
+                },
+
+                resetAvailableNames() {
+                    this.availableNames = [...this.allNames];
+                },
+
+                resetAllWinners() {
                     this.winners = [];
                     this.lastWinners = [];
-                    this.selectionHistory = {};
-                    
-                    // Simpan state
-                    this.saveStateToLocalStorage();
-                    
-                    // Tampilkan notifikasi sukses
-                    this.showNotification('Daftar nama berhasil diatur!');
+                    this.resetAvailableNames();
                 },
-                
-                // Fisher-Yates Shuffle Algorithm
-                shuffleArray(array) {
-                    const newArray = [...array];
-                    for (let i = newArray.length - 1; i > 0; i--) {
-                        const j = Math.floor(Math.random() * (i + 1));
-                        [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
-                    }
-                    return newArray;
-                },
-                
-                // Proses pemilihan pemenang
+
+                // --- PICKING PROCESS ---
                 startPickingProcess() {
-                    // Validasi
-                    if (this.availableNames.length === 0) {
-                        this.showNotification('Daftar nama kosong! Tambahkan nama terlebih dahulu.');
+                    // Prevent starting if already running or not enough names
+                    if (this.isPicking || this.isCountingDown || this.availableNames.length < this.numWinners) {
+                        if (this.availableNames.length < this.numWinners) {
+                           alert(`Tidak cukup nama tersedia. Dibutuhkan ${this.numWinners}, tersedia ${this.availableNames.length}.`);
+                        }
                         return;
                     }
                     
-                    if (this.availableNames.length < this.numWinners) {
-                        this.showNotification(`Tidak cukup nama tersedia! Hanya ada ${this.availableNames.length} nama.`);
-                        return;
-                    }
-                    
-                    // Mulai hitung mundur
+                    this.lastWinners = [];
+                    this.showConfetti = false;
+
+                    // 1. Countdown Phase
                     this.isCountingDown = true;
                     this.countdownValue = this.countdownDuration;
-                    
-                    // Mainkan efek suara jika diaktifkan
-                    if (this.isSoundEnabled) {
-                        this.playCountdownSound();
-                    }
-                    
                     const countdownInterval = setInterval(() => {
+                        this.playSound('tick');
                         this.countdownValue--;
-                        
-                        // Mainkan efek suara jika diaktifkan
-                        if (this.isSoundEnabled && this.countdownValue > 0) {
-                            this.playCountdownSound();
-                        }
-                        
                         if (this.countdownValue <= 0) {
                             clearInterval(countdownInterval);
                             this.isCountingDown = false;
                             
-                            // Tentukan pemenang
-                            const shuffledNames = this.shuffleArray(this.availableNames);
-                            const winners = shuffledNames.slice(0, this.numWinners);
+                            // 2. Determine winners (after countdown, before animation)
+                            const pickedWinners = this.pickRandomWinners();
                             
-                            // Mulai animasi pemilihan
-                            this.isPicking = true;
-                            
-                            setTimeout(() => {
-                                this.isPicking = false;
-                                this.lastWinners = winners;
-                                
-                                // Perbarui state
-                                this.winners.push(...winners);
-                                
-                                // Perbarui riwayat
-                                const timestamp = new Date().toISOString();
-                                this.selectionHistory[timestamp] = winners;
-                                
-                                // Hapus pemenang jika diatur
-                                if (this.removeAfterPicking) {
-                                    this.availableNames = this.availableNames.filter(
-                                        name => !winners.includes(name)
-                                    );
-                                }
-                                
-                                // Tampilkan efek
-                                this.showConfetti = true;
-                                if (this.isSoundEnabled) {
-                                    this.playWinnerSound();
-                                }
-                                
-                                // Simpan state
-                                this.saveStateToLocalStorage();
-                                
-                                // Sembunyikan confetti setelah 5 detik
-                                setTimeout(() => {
-                                    this.showConfetti = false;
-                                }, 5000);
-                            }, this.shuffleDuration * 1000);
+                            // 3. Shuffle Animation Phase
+                            this.startShuffleAnimation(pickedWinners);
                         }
                     }, 1000);
                 },
-                
-                // Tampilkan notifikasi
-                showNotification(message) {
-                    const notification = document.getElementById('notification');
-                    notification.textContent = message;
-                    notification.classList.remove('opacity-0', 'translate-y-4');
-                    notification.classList.add('opacity-100', 'translate-y-0');
-                    
+
+                pickRandomWinners() {
+                    const shuffled = this.fisherYatesShuffle([...this.availableNames]);
+                    return shuffled.slice(0, this.numWinners);
+                },
+
+                startShuffleAnimation(winners) {
+                    this.isPicking = true;
+                    let shuffleInterval;
+
+                    if (this.availableNames.length > 0) {
+                        shuffleInterval = setInterval(() => {
+                            const randomIndex = Math.floor(Math.random() * this.availableNames.length);
+                            this.shufflingName = this.availableNames[randomIndex];
+                        }, 75); // Fast shuffling display
+                    }
+
+
                     setTimeout(() => {
-                        notification.classList.remove('opacity-100', 'translate-y-0');
-                        notification.classList.add('opacity-0', 'translate-y-4');
-                    }, 3000);
+                        clearInterval(shuffleInterval);
+                        this.isPicking = false;
+                        this.shufflingName = '';
+                        
+                        // 4. Show Results Phase
+                        this.revealWinners(winners);
+                    }, this.shuffleDuration * 1000);
+                },
+
+                revealWinners(winners) {
+                    this.lastWinners = winners;
+                    this.winners.push(...winners);
+                    if(this.removeAfterPicking) {
+                        this.availableNames = this.availableNames.filter(name => !winners.includes(name));
+                    }
+                    this.playSound('win');
+                    this.triggerConfetti();
+                },
+
+                // --- ADVANCED FEATURES ---
+
+                // 1. Group Management
+                handleSaveGroup() {
+                    if (!this.newGroupName.trim() || !this.allNames.length) return;
+                    this.savedGroups[this.newGroupName.trim()] = [...this.allNames];
+                    this.activeGroup = this.newGroupName.trim();
+                    this.newGroupName = '';
+                },
+                handleLoadGroup(groupName) {
+                    this.namesInput = this.savedGroups[groupName].join('\n');
+                    this.handleSetNames();
+                    this.activeGroup = groupName;
+                },
+                handleDeleteGroup(groupName) {
+                    if (confirm(`Apakah Anda yakin ingin menghapus grup "${groupName}"?`)) {
+                        delete this.savedGroups[groupName];
+                        if (this.activeGroup === groupName) {
+                            this.activeGroup = null;
+                            this.namesInput = '';
+                            this.handleSetNames();
+                        }
+                    }
+                },
+
+                // 2. Presentation Mode
+                enterPresentationMode() {
+                    this.isPresentationMode = true;
+                    this.$nextTick(() => {
+                        this.$refs.presentationView.requestFullscreen();
+                    });
+                },
+                exitPresentationMode() {
+                    if (document.fullscreenElement) {
+                        document.exitFullscreen();
+                    }
+                    this.isPresentationMode = false;
                 },
                 
-                // Reset aplikasi
-                resetApp() {
-                    if (confirm('Apakah Anda yakin ingin mereset aplikasi? Semua data akan dihapus.')) {
+                // 3. Actions Menu
+                handleFileImport(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        this.namesInput = e.target.result;
+                        this.handleSetNames();
+                    };
+                    reader.readAsText(file);
+                    this.isActionsMenuOpen = false;
+                },
+                handleExport() {
+                    const blob = new Blob([this.allNames.join('\n')], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `pickster_nama_${new Date().toISOString().slice(0,10)}.txt`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    this.isActionsMenuOpen = false;
+                },
+                shuffleInputNames() {
+                    const names = this.namesInput.split('\n')
+                        .map(name => name.trim())
+                        .filter(name => name !== '');
+                    this.namesInput = this.fisherYatesShuffle(names).join('\n');
+                    this.isActionsMenuOpen = false;
+                },
+                resetEverything() {
+                    if (confirm('PERINGATAN: Ini akan menghapus SEMUA nama, grup, riwayat, dan pengaturan. Aksi ini tidak bisa dibatalkan. Lanjutkan?')) {
+                        localStorage.removeItem('pickster_names');
+                        localStorage.removeItem('pickster_winners');
+                        localStorage.removeItem('pickster_groups');
+                        localStorage.removeItem('pickster_settings');
+                        
+                        // Reset all state properties to default
                         this.namesInput = '';
                         this.allNames = [];
                         this.availableNames = [];
                         this.winners = [];
                         this.lastWinners = [];
-                        this.selectionHistory = {};
+                        this.numWinners = 1;
+                        this.shuffleDuration = 3;
+                        this.countdownDuration = 3;
+                        this.removeAfterPicking = true;
+                        this.isPicking = false;
+                        this.isCountingDown = false;
+                        this.savedGroups = {};
                         this.activeGroup = null;
-                        this.saveStateToLocalStorage();
-                        this.showNotification('Aplikasi berhasil direset!');
-                    }
-                },
-                
-                // Manajemen Grup
-                handleSaveGroup() {
-                    if (!this.newGroupName.trim()) {
-                        this.showNotification('Nama grup tidak boleh kosong!');
-                        return;
-                    }
-                    
-                    if (this.allNames.length === 0) {
-                        this.showNotification('Tidak ada nama untuk disimpan!');
-                        return;
-                    }
-                    
-                    this.savedGroups[this.newGroupName] = [...this.allNames];
-                    this.activeGroup = this.newGroupName;
-                    this.saveStateToLocalStorage();
-                    
-                    this.showNotification(`Grup "${this.newGroupName}" berhasil disimpan!`);
-                    this.newGroupName = '';
-                },
-                
-                handleLoadGroup(groupName) {
-                    if (this.savedGroups[groupName]) {
-                        this.allNames = [...this.savedGroups[groupName]];
-                        this.availableNames = [...this.savedGroups[groupName]];
-                        this.winners = [];
-                        this.lastWinners = [];
-                        this.activeGroup = groupName;
-                        this.namesInput = this.savedGroups[groupName].join('\n');
-                        this.saveStateToLocalStorage();
-                        this.showNotification(`Grup "${groupName}" berhasil dimuat!`);
-                    }
-                },
-                
-                handleDeleteGroup(groupName) {
-                    if (confirm(`Apakah Anda yakin ingin menghapus grup "${groupName}"?`)) {
-                        delete this.savedGroups[groupName];
                         
-                        if (this.activeGroup === groupName) {
-                            this.activeGroup = null;
-                        }
-                        
-                        this.saveStateToLocalStorage();
-                        this.showNotification(`Grup "${groupName}" berhasil dihapus!`);
+                        console.log('Semua data telah direset.');
+                        this.isActionsMenuOpen = false;
                     }
                 },
-                
-                // Mode Presentasi
-                enterPresentationMode() {
-                    this.isPresentationMode = true;
-                    
-                    // Masuk ke mode layar penuh
-                    const elem = document.documentElement;
-                    if (elem.requestFullscreen) {
-                        elem.requestFullscreen();
-                    } else if (elem.webkitRequestFullscreen) { /* Safari */
-                        elem.webkitRequestFullscreen();
-                    } else if (elem.msRequestFullscreen) { /* IE11 */
-                        elem.msRequestFullscreen();
+
+                // --- HELPERS ---
+                fisherYatesShuffle(array) {
+                    let currentIndex = array.length, randomIndex;
+                    while (currentIndex > 0) {
+                        randomIndex = Math.floor(Math.random() * currentIndex);
+                        currentIndex--;
+                        [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
                     }
+                    return array;
                 },
-                
-                exitPresentationMode() {
-                    this.isPresentationMode = false;
-                    
-                    // Keluar dari mode layar penuh
-                    if (document.exitFullscreen) {
-                        document.exitFullscreen();
-                    } else if (document.webkitExitFullscreen) { /* Safari */
-                        document.webkitExitFullscreen();
-                    } else if (document.msExitFullscreen) { /* IE11 */
-                        document.msExitFullscreen();
-                    }
+
+                // --- VISUAL & AUDIO EFFECTS ---
+                triggerConfetti() {
+                    this.showConfetti = true;
+                    setTimeout(() => this.showConfetti = false, 5000);
                 },
-                
-                // Efek Suara
-                playCountdownSound() {
-                    const oscillator = this.audioContext.createOscillator();
+                playSound(type) {
+                    if (!this.isSoundEnabled || !this.audioContext || this.audioContext.state === 'suspended') {
+                         this.audioContext.resume();
+                    };
+
+                    const now = this.audioContext.currentTime;
                     const gainNode = this.audioContext.createGain();
-                    
-                    oscillator.type = 'sine';
-                    oscillator.frequency.setValueAtTime(800, this.audioContext.currentTime);
-                    oscillator.connect(gainNode);
+                    gainNode.gain.setValueAtTime(0.1, now); // Volume
                     gainNode.connect(this.audioContext.destination);
-                    
-                    gainNode.gain.setValueAtTime(0.3, this.audioContext.currentTime);
-                    gainNode.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + 0.2);
-                    
-                    oscillator.start();
-                    oscillator.stop(this.audioContext.currentTime + 0.2);
-                },
-                
-                playWinnerSound() {
-                    const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
-                    const time = this.audioContext.currentTime;
-                    
-                    notes.forEach((freq, i) => {
+
+                    if (type === 'tick') {
                         const oscillator = this.audioContext.createOscillator();
-                        const gainNode = this.audioContext.createGain();
-                        
-                        oscillator.type = 'triangle';
-                        oscillator.frequency.setValueAtTime(freq, time);
+                        oscillator.type = 'sine';
+                        oscillator.frequency.setValueAtTime(880, now); // A5 note
                         oscillator.connect(gainNode);
-                        gainNode.connect(this.audioContext.destination);
-                        
-                        gainNode.gain.setValueAtTime(0.5, time + i * 0.15);
-                        gainNode.gain.exponentialRampToValueAtTime(0.001, time + i * 0.15 + 0.5);
-                        
-                        oscillator.start(time + i * 0.15);
-                        oscillator.stop(time + i * 0.15 + 0.5);
-                    });
+                        oscillator.start(now);
+                        oscillator.stop(now + 0.05);
+                    } else if (type === 'win') {
+                        const oscillator = this.audioContext.createOscillator();
+                        oscillator.type = 'triangle';
+                        oscillator.connect(gainNode);
+                        // Play a simple C-E-G arpeggio
+                        oscillator.frequency.setValueAtTime(523.25, now); // C5
+                        oscillator.frequency.setValueAtTime(659.25, now + 0.1); // E5
+                        oscillator.frequency.setValueAtTime(783.99, now + 0.2); // G5
+                        gainNode.gain.exponentialRampToValueAtTime(0.00001, now + 0.5);
+                        oscillator.start(now);
+                        oscillator.stop(now + 0.5);
+                    }
                 },
                 
-                // Toggle suara
-                toggleSound() {
-                    this.isSoundEnabled = !this.isSoundEnabled;
-                    this.saveStateToLocalStorage();
-                    this.showNotification(`Efek suara ${this.isSoundEnabled ? 'diaktifkan' : 'dinonaktifkan'}!`);
-                },
-                
-                // Kelas dinamis untuk tata letak pemenang
-                winnerLayoutClass() {
+                // Dynamic class for winner display
+                winnerContainerClass() {
                     const count = this.lastWinners.length;
-                    
-                    if (count === 0) return '';
-                    if (count === 1) return 'flex flex-col justify-center items-center text-6xl md:text-8xl';
-                    if (count <= 4) return 'grid grid-cols-2 gap-4 text-3xl md:text-5xl';
-                    if (count <= 9) return 'grid grid-cols-3 gap-3 text-2xl md:text-4xl';
-                    return 'grid grid-cols-4 gap-2 text-xl md:text-3xl';
+                    if (count <= 1) return 'flex flex-col items-center justify-center';
+                    if (count <= 4) return 'grid grid-cols-1 md:grid-cols-2 gap-4';
+                    if (count <= 9) return 'grid grid-cols-2 md:grid-cols-3 gap-4';
+                    return 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3';
+                },
+                winnerTextClass() {
+                     const count = this.lastWinners.length;
+                    if (count <= 1) return 'font-black text-6xl sm:text-7xl md:text-8xl lg:text-9xl';
+                    if (count <= 4) return 'font-bold text-4xl sm:text-5xl md:text-6xl';
+                    if (count <= 9) return 'font-semibold text-3xl sm:text-4xl';
+                    return 'font-medium text-2xl sm:text-3xl';
                 }
-            }));
-        });
+            }
+        }
     </script>
-    <style>
-        @keyframes confetti-fall {
-            0% { transform: translateY(-100vh) rotate(0deg); opacity: 1; }
-            100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
-        }
-        
-        .confetti {
-            position: fixed;
-            top: -10px;
-            width: 10px;
-            height: 10px;
-            opacity: 0;
-            animation: confetti-fall 5s ease-in-out forwards;
-        }
-        
-        .shuffle-animation {
-            animation: shuffle 0.1s infinite;
-        }
-        
-        @keyframes shuffle {
-            0%, 100% { opacity: 1; transform: translateY(0); }
-            50% { opacity: 0.5; transform: translateY(-5px); }
-        }
-        
-        .slide-in {
-            animation: slideIn 0.3s ease-out forwards;
-        }
-        
-        @keyframes slideIn {
-            from { transform: translateY(100%); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-        
-        .notification {
-            transition: all 0.3s ease-in-out;
-        }
-    </style>
 </head>
-<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
-    <div x-data="picksterApp()" x-init="init()" class="max-w-7xl mx-auto px-4 py-8">
-        <!-- Header -->
-        <header class="text-center mb-10">
-            <h1 class="text-3xl md:text-5xl font-bold text-indigo-800 mb-2">Random Name Picker</h1>
-            <p class="text-gray-600">Pilih pemenang secara acak dengan mudah dan menyenangkan!</p>
-        </header>
-        
-        <!-- Main Grid Layout -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <!-- Sidebar (Input & Settings) -->
-            <div class="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 h-fit">
-                <!-- Tabs -->
-                <div class="flex border-b mb-4">
-                    <button 
-                        @click="groupTab = 'current'" 
-                        :class="{ 'border-b-2 border-indigo-600 text-indigo-600': groupTab === 'current' }" 
-                        class="px-4 py-2 font-medium"
-                    >
-                        Daftar Saat Ini
+<body class="bg-gray-900 text-gray-200 antialiased">
+    <div x-data="picksterApp()" x-init="init()" class="min-h-screen flex flex-col">
+        <!-- Main Header -->
+        <header class="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700/50 sticky top-0 z-30">
+            <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+                <h1 class="text-2xl font-bold text-white tracking-tight">
+                    <span class="text-indigo-400">Pick</span>ster
+                </h1>
+                <div class="flex items-center space-x-4">
+                    <button @click="isPresentationMode ? exitPresentationMode() : enterPresentationMode()" class="px-3 py-2 text-sm font-medium rounded-md hover:bg-indigo-500 bg-indigo-600 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-indigo-500" title="Mode Presentasi">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z" /><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.022 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd" /></svg>
                     </button>
-                    <button 
-                        @click="groupTab = 'groups'" 
-                        :class="{ 'border-b-2 border-indigo-600 text-indigo-600': groupTab === 'groups' }" 
-                        class="px-4 py-2 font-medium"
-                    >
-                        Grup
+                    <button @click="isSoundEnabled = !isSoundEnabled" class="px-3 py-2 rounded-md hover:bg-gray-700 text-gray-300 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-indigo-500" :class="{'bg-gray-700': !isSoundEnabled, 'bg-gray-600': isSoundEnabled}" :title="isSoundEnabled ? 'Matikan Suara' : 'Nyalakan Suara'">
+                        <svg x-show="isSoundEnabled" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a6 6 0 00-6 6v3.586l-1.707 1.707A1 1 0 003 15v1a1 1 0 001 1h12a1 1 0 001-1v-1a1 1 0 00-.293-.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" /></svg>
+                        <svg x-show="!isSoundEnabled" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
                     </button>
-                </div>
-                
-                <!-- Current List Tab -->
-                <div x-show="groupTab === 'current'">
-                    <!-- Input Area -->
-                    <div class="mb-6">
-                        <label class="block text-gray-700 font-medium mb-2">Masukkan Nama (satu per baris):</label>
-                        <textarea 
-                            x-model="namesInput" 
-                            class="w-full h-40 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                            placeholder="Contoh:&#10;John Doe&#10;Jane Smith&#10;Alex Johnson"
-                        ></textarea>
-                        <button 
-                            @click="handleSetNames()" 
-                            class="w-full mt-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition"
-                        >
-                            Atur Daftar
-                        </button>
-                    </div>
-                    
-                    <!-- Info Stats -->
-                    <div class="grid grid-cols-2 gap-4 mb-6">
-                        <div class="bg-blue-50 p-4 rounded-lg text-center">
-                            <p class="text-2xl font-bold text-indigo-700" x-text="allNames.length"></p>
-                            <p class="text-gray-600">Total Nama</p>
-                        </div>
-                        <div class="bg-green-50 p-4 rounded-lg text-center">
-                            <p class="text-2xl font-bold text-indigo-700" x-text="availableNames.length"></p>
-                            <p class="text-gray-600">Tersedia</p>
-                        </div>
-                    </div>
-                    
-                    <!-- Settings -->
-                    <div class="space-y-4">
-                        <h3 class="text-xl font-bold text-gray-800 mb-3">Pengaturan</h3>
-                        
-                        <div>
-                            <label class="block text-gray-700 mb-1">Jumlah Pemenang:</label>
-                            <input 
-                                type="number" 
-                                x-model="numWinners" 
-                                min="1" 
-                                class="w-full p-2 border border-gray-300 rounded-lg"
-                            >
-                        </div>
-                        
-                        <div>
-                            <label class="block text-gray-700 mb-1">Durasi Hitung Mundur (detik):</label>
-                            <input 
-                                type="number" 
-                                x-model="countdownDuration" 
-                                min="1" 
-                                max="10" 
-                                class="w-full p-2 border border-gray-300 rounded-lg"
-                            >
-                        </div>
-                        
-                        <div>
-                            <label class="block text-gray-700 mb-1">Durasi Animasi (detik):</label>
-                            <input 
-                                type="number" 
-                                x-model="shuffleDuration" 
-                                min="1" 
-                                max="10" 
-                                class="w-full p-2 border border-gray-300 rounded-lg"
-                            >
-                        </div>
-                        
-                        <div class="flex items-center">
-                            <input 
-                                type="checkbox" 
-                                x-model="removeAfterPicking" 
-                                id="removeAfterPicking" 
-                                class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                            >
-                            <label for="removeAfterPicking" class="ml-2 text-gray-700">Hapus pemenang setelah dipilih</label>
-                        </div>
-                        
-                        <div class="flex items-center">
-                            <input 
-                                type="checkbox" 
-                                x-model="isSoundEnabled" 
-                                id="isSoundEnabled" 
-                                class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                            >
-                            <label for="isSoundEnabled" class="ml-2 text-gray-700">Aktifkan efek suara</label>
-                        </div>
-                    </div>
-                    
-                    <!-- Reset Button -->
-                    <button 
-                        @click="resetApp()" 
-                        class="mt-6 w-full bg-red-100 hover:bg-red-200 text-red-700 font-bold py-2 px-4 rounded-lg transition"
-                    >
-                        Reset Aplikasi
-                    </button>
-                </div>
-                
-                <!-- Groups Tab -->
-                <div x-show="groupTab === 'groups'">
-                    <!-- Save Group -->
-                    <div class="mb-6">
-                        <label class="block text-gray-700 font-medium mb-2">Simpan Grup Baru:</label>
-                        <div class="flex">
-                            <input 
-                                x-model="newGroupName" 
-                                type="text" 
-                                class="flex-1 p-2 border border-gray-300 rounded-l-lg" 
-                                placeholder="Nama grup"
-                            >
-                            <button 
-                                @click="handleSaveGroup()" 
-                                class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-r-lg"
-                            >
-                                Simpan
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Saved Groups -->
-                    <div>
-                        <h3 class="text-xl font-bold text-gray-800 mb-3">Grup Tersimpan</h3>
-                        
-                        <template x-for="(groupNames, groupName) in savedGroups" :key="groupName">
-                            <div class="flex items-center justify-between p-3 mb-2 bg-gray-50 rounded-lg">
-                                <span class="font-medium" x-text="groupName"></span>
-                                <div class="flex space-x-2">
-                                    <button 
-                                        @click="handleLoadGroup(groupName)" 
-                                        class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm"
-                                    >
-                                        Muat
-                                    </button>
-                                    <button 
-                                        @click="handleDeleteGroup(groupName)" 
-                                        class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm"
-                                    >
-                                        Hapus
-                                    </button>
-                                </div>
-                            </div>
-                        </template>
-                        
-                        <p x-show="Object.keys(savedGroups).length === 0" class="text-gray-500 italic">
-                            Belum ada grup yang disimpan
-                        </p>
-                    </div>
                 </div>
             </div>
-            
-            <!-- Main Content -->
-            <div class="lg:col-span-2">
-                <!-- Pick Button & Results -->
-                <div class="bg-white rounded-2xl shadow-lg p-6 mb-8">
-                    <div class="flex justify-center mb-6">
-                        <button 
-                            @click="startPickingProcess()" 
-                            :disabled="isCountingDown || isPicking || availableNames.length === 0"
-                            :class="{
-                                'bg-indigo-600 hover:bg-indigo-700': !isCountingDown && !isPicking,
-                                'bg-indigo-400': isCountingDown || isPicking,
-                                'bg-gray-400': availableNames.length === 0
-                            }"
-                            class="py-4 px-10 text-white font-bold text-xl rounded-full transition relative overflow-hidden"
-                        >
-                            <span x-show="!isCountingDown && !isPicking">PILIH PEMENANG!</span>
-                            <span x-show="isCountingDown" x-text="countdownValue"></span>
-                            <span x-show="isPicking" class="shuffle-animation">MENGACAK...</span>
-                            
-                            <template x-if="isCountingDown || isPicking">
-                                <span class="absolute inset-0 bg-indigo-800 animate-pulse"></span>
-                            </template>
-                        </button>
-                    </div>
-                    
-                    <!-- Results -->
-                    <div class="min-h-[300px] flex items-center justify-center">
-                        <template x-if="lastWinners.length > 0">
-                            <div 
-                                :class="winnerLayoutClass()" 
-                                class="w-full transition-all duration-500"
-                            >
-                                <template x-for="(winner, index) in lastWinners" :key="index">
-                                    <div 
-                                        class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold p-4 md:p-6 rounded-xl shadow-lg flex items-center justify-center text-center transform transition hover:scale-105"
-                                        x-text="winner"
-                                    ></div>
+        </header>
+
+        <!-- Main Content Grid -->
+        <main class="flex-grow container mx-auto p-4 md:p-6 lg:p-8">
+            <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+
+                <!-- Left Column: Controls -->
+                <div class="lg:col-span-2 space-y-6">
+
+                    <!-- Name Input & Groups -->
+                    <div class="bg-gray-800 rounded-xl shadow-lg">
+                        <div class="border-b border-gray-700">
+                            <nav class="flex -mb-px">
+                                <button @click="activeTab = 'input'" :class="{'border-indigo-400 text-indigo-300': activeTab === 'input', 'border-transparent text-gray-400 hover:text-white hover:border-gray-500': activeTab !== 'input'}" class="w-1/2 py-4 px-1 text-center border-b-2 font-medium text-sm transition-colors duration-200">
+                                    Input Nama
+                                </button>
+                                <button @click="activeTab = 'groups'" :class="{'border-indigo-400 text-indigo-300': activeTab === 'groups', 'border-transparent text-gray-400 hover:text-white hover:border-gray-500': activeTab !== 'groups'}" class="w-1/2 py-4 px-1 text-center border-b-2 font-medium text-sm transition-colors duration-200">
+                                    Grup (<span x-text="Object.keys(savedGroups).length"></span>)
+                                </button>
+                            </nav>
+                        </div>
+
+                        <!-- Tab Content: Input -->
+                        <div x-show="activeTab === 'input'" class="p-5">
+                            <label for="names-input" class="block text-sm font-medium text-gray-400 mb-2">Masukkan nama (satu per baris)</label>
+                            <textarea id="names-input" x-model="namesInput" rows="10" class="w-full bg-gray-900 border-2 border-gray-700 rounded-md p-3 text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors" placeholder="Asep&#10;Budi&#10;Cahyo&#10;..."></textarea>
+                            <div class="mt-4 flex justify-between items-center">
+                                <button @click="handleSetNames" class="w-full bg-indigo-600 text-white font-semibold py-2.5 px-4 rounded-md hover:bg-indigo-700 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-indigo-500 disabled:bg-gray-500 disabled:cursor-not-allowed" :disabled="!namesInput.trim()">
+                                    Atur Daftar Nama
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2 text-center" x-show="activeGroup">Grup aktif: <span class="font-semibold text-indigo-400" x-text="activeGroup"></span></p>
+                        </div>
+                        
+                        <!-- Tab Content: Groups -->
+                        <div x-show="activeTab === 'groups'" class="p-5 space-y-4">
+                            <div>
+                                <label for="new-group-name" class="block text-sm font-medium text-gray-400 mb-2">Simpan daftar saat ini sebagai grup baru</label>
+                                <div class="flex space-x-2">
+                                    <input type="text" id="new-group-name" x-model="newGroupName" class="flex-grow bg-gray-900 border-2 border-gray-700 rounded-md p-2 text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors" placeholder="Nama Grup...">
+                                    <button @click="handleSaveGroup" class="bg-green-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-700 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-green-500 disabled:bg-gray-500 disabled:cursor-not-allowed" :disabled="!newGroupName.trim() || !allNames.length">Simpan</button>
+                                </div>
+                            </div>
+                            <div class="space-y-2 max-h-60 overflow-y-auto">
+                                <p x-show="Object.keys(savedGroups).length === 0" class="text-sm text-gray-500 text-center py-4">Belum ada grup yang disimpan.</p>
+                                <template x-for="(group, groupName) in savedGroups" :key="groupName">
+                                    <div class="flex items-center justify-between bg-gray-700/50 p-3 rounded-md">
+                                        <span class="font-medium text-white" x-text="groupName"></span>
+                                        <div class="flex space-x-2">
+                                            <button @click="handleLoadGroup(groupName)" class="text-indigo-400 hover:text-indigo-300 transition-colors text-sm font-semibold">Muat</button>
+                                            <button @click="handleDeleteGroup(groupName)" class="text-red-400 hover:text-red-300 transition-colors text-sm font-semibold">Hapus</button>
+                                        </div>
+                                    </div>
                                 </template>
                             </div>
-                        </template>
-                        
-                        <template x-if="lastWinners.length === 0">
-                            <div class="text-center py-16">
-                                <div class="text-indigo-300 mb-4">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-24 w-24 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                                    </svg>
+                        </div>
+                    </div>
+
+                    <!-- Settings Accordion -->
+                    <div class="bg-gray-800 rounded-xl shadow-lg">
+                        <button @click="isSettingsOpen = !isSettingsOpen" class="w-full flex justify-between items-center p-4 font-bold text-lg text-white">
+                            <span>Pengaturan</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 transition-transform" :class="{'rotate-180': isSettingsOpen}" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+                        </button>
+                        <div x-show="isSettingsOpen" x-collapse class="p-5 border-t border-gray-700 space-y-4">
+                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="num-winners" class="block text-sm font-medium text-gray-400">Jumlah Pemenang</label>
+                                    <input type="number" id="num-winners" x-model.number="numWinners" min="1" :max="availableNames.length" class="mt-1 w-full bg-gray-900 border-2 border-gray-700 rounded-md p-2 text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                                 </div>
-                                <h3 class="text-xl font-bold text-gray-500">Belum ada pemenang</h3>
-                                <p class="text-gray-400">Klik tombol "Pilih Pemenang!" untuk memulai</p>
+                                <div>
+                                    <label for="countdown-duration" class="block text-sm font-medium text-gray-400">Durasi Hitung Mundur (detik)</label>
+                                    <input type="number" id="countdown-duration" x-model.number="countdownDuration" min="1" class="mt-1 w-full bg-gray-900 border-2 border-gray-700 rounded-md p-2 text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label for="shuffle-duration" class="block text-sm font-medium text-gray-400">Durasi Animasi (detik)</label>
+                                    <input type="number" id="shuffle-duration" x-model.number="shuffleDuration" min="1" class="mt-1 w-full bg-gray-900 border-2 border-gray-700 rounded-md p-2 text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                            </div>
+                            <div class="flex items-center space-x-3">
+                                <input type="checkbox" id="remove-after-picking" x-model="removeAfterPicking" class="h-4 w-4 rounded bg-gray-700 border-gray-600 text-indigo-600 focus:ring-indigo-500">
+                                <label for="remove-after-picking" class="text-sm font-medium text-gray-300">Hapus nama setelah terpilih</label>
+                            </div>
+                        </div>
+                    </div>
+                     <!-- Actions -->
+                    <div class="relative" x-data="{ open: false }">
+                         <button @click="open = !open" class="w-full flex items-center justify-center space-x-2 py-2.5 px-4 text-sm font-medium text-gray-300 bg-gray-700 rounded-md hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-indigo-500">
+                            <span>Aksi Lainnya</span>
+                             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM18 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                         </button>
+                         <div x-show="open" @click.away="open = false" x-transition class="absolute bottom-full mb-2 w-full bg-gray-800 border border-gray-700 rounded-md shadow-lg z-10">
+                             <a href="#" @click.prevent="$refs.fileInput.click()" class="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">Impor dari .txt</a>
+                             <input type="file" x-ref="fileInput" @change="handleFileImport($event); open = false" accept=".txt" class="hidden">
+                             <a href="#" @click.prevent="handleExport(); open = false" class="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">Ekspor ke .txt</a>
+                             <a href="#" @click.prevent="resetAllWinners(); open = false" class="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">Reset Pemenang</a>
+                             <a href="#" @click.prevent="shuffleInputNames(); open = false" class="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">Acak Daftar Input</a>
+                             <hr class="border-gray-700 my-1">
+                             <a href="#" @click.prevent="resetEverything(); open = false" class="block w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-500 hover:text-white">Reset Semuanya</a>
+                         </div>
+                    </div>
+
+                </div>
+
+                <!-- Right Column: Results -->
+                <div class="lg:col-span-3 bg-gray-800 rounded-xl shadow-lg flex flex-col min-h-[60vh] lg:min-h-0 relative overflow-hidden">
+                    <!-- Confetti container -->
+                    <div x-show="showConfetti" class="absolute inset-0 pointer-events-none z-20">
+                        <template x-for="i in 50" :key="i">
+                           <div class="confetti" 
+                                :style="`left: ${Math.random()*100}%; background-color: hsla(${Math.random()*360}, 100%, 70%, 1); animation-delay: ${Math.random()*2}s;`">
+                           </div>
+                        </template>
+                    </div>
+
+                    <!-- Main Display Area -->
+                    <div class="flex-grow flex flex-col items-center justify-center p-6 text-center">
+
+                        <!-- State: Initial/Ready -->
+                        <div x-show="!isPicking && !isCountingDown && lastWinners.length === 0" class="text-center text-gray-500">
+                            <h2 class="text-3xl font-bold mb-2">Siap Memilih Pemenang?</h2>
+                            <p>Total Nama: <strong class="text-white" x-text="allNames.length"></strong> | Tersedia: <strong class="text-white" x-text="availableNames.length"></strong></p>
+                            <p class="mt-4" x-show="availableNames.length < numWinners">
+                                <span class="text-yellow-400">Peringatan: Jumlah nama yang tersedia lebih sedikit dari jumlah pemenang yang akan dipilih.</span>
+                            </p>
+                        </div>
+
+                        <!-- State: Countdown -->
+                        <div x-show="isCountingDown" class="text-center">
+                            <p class="text-2xl font-medium text-gray-400 mb-4">Bersiaplah...</p>
+                            <p class="text-9xl font-black text-white" x-text="countdownValue" x-transition:enter.duration.300ms x-transition:leave.duration.300ms></p>
+                        </div>
+                        
+                        <!-- State: Picking/Shuffling -->
+                        <div x-show="isPicking" class="text-center w-full">
+                            <p class="text-2xl font-medium text-gray-400 mb-4">Memilih...</p>
+                            <p class="text-6xl font-bold text-white truncate w-full px-4" x-text="shufflingName" x-transition></p>
+                        </div>
+                        
+                        <!-- State: Winners Displayed -->
+                        <div x-show="lastWinners.length > 0 && !isPicking && !isCountingDown" class="w-full h-full flex flex-col justify-center" x-transition:enter="transition ease-out duration-500" x-transition:enter-start="opacity-0 transform scale-90" x-transition:enter-end="opacity-100 transform scale-100">
+                             <h2 class="text-xl font-bold text-green-400 mb-4 tracking-wider uppercase">Pemenang!</h2>
+                             <div class="flex-grow flex items-center justify-center w-full p-4">
+                                <div class="w-full text-center" :class="winnerContainerClass()">
+                                    <template x-for="winner in lastWinners" :key="winner">
+                                        <div class="p-2 rounded-lg bg-gray-700/50 break-words">
+                                            <span :class="winnerTextClass()" class="text-white" x-text="winner"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                             </div>
+                        </div>
+
+                    </div>
+                    
+                    <!-- Footer Actions for Result Panel -->
+                    <div class="p-4 bg-gray-900/50 border-t border-gray-700 flex items-center justify-between">
+                         <button @click="isHistorySheetOpen = true" class="text-sm font-medium text-gray-400 hover:text-white transition-colors">
+                            Riwayat Pemenang (<span x-text="winners.length"></span>)
+                         </button>
+                         <button @click="startPickingProcess()" 
+                                 class="bg-green-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-green-700 transition-all transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-green-500/50 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:transform-none"
+                                 :disabled="isPicking || isCountingDown || availableNames.length < numWinners">
+                            Pilih Pemenang
+                         </button>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+
+        <!-- History Sheet Overlay -->
+        <div x-show="isHistorySheetOpen" @click.away="isHistorySheetOpen = false" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 bg-black/70 flex justify-end z-40">
+            <div @click.stop x-show="isHistorySheetOpen" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="transform translate-x-full" x-transition:enter-end="transform translate-x-0" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="transform translate-x-0" x-transition:leave-end="transform translate-x-full" class="w-full max-w-md bg-gray-800 h-full flex flex-col shadow-2xl">
+                <div class="flex items-center justify-between p-4 border-b border-gray-700">
+                    <h2 class="text-xl font-bold text-white">Riwayat Pemenang</h2>
+                    <button @click="isHistorySheetOpen = false" class="text-gray-400 hover:text-white">&times;</button>
+                </div>
+                <div class="flex-grow overflow-y-auto p-4 space-y-2">
+                     <p x-show="winners.length === 0" class="text-gray-500 text-center mt-8">Belum ada pemenang yang dipilih.</p>
+                     <template x-for="(winner, index) in [...winners].reverse()" :key="index">
+                        <div class="flex items-center bg-gray-700/50 p-3 rounded-md">
+                            <span class="text-sm font-mono text-gray-500 mr-4" x-text="winners.length - index + '.'"></span>
+                            <span class="font-medium text-white" x-text="winner"></span>
+                        </div>
+                     </template>
+                </div>
+                <div class="p-4 border-t border-gray-700">
+                    <button @click="resetAllWinners(); isHistorySheetOpen=false" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 transition-colors disabled:bg-gray-500" :disabled="winners.length === 0">
+                        Reset Semua Pemenang
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Presentation Mode Overlay -->
+        <div x-show="isPresentationMode" x-ref="presentationView" @keydown.window.escape.prevent="exitPresentationMode" @keydown.window.space.prevent="startPickingProcess()" class="fixed inset-0 bg-gray-900 z-50 flex flex-col items-center justify-center text-white p-8">
+            <!-- Countdown in Presentation Mode -->
+            <div x-show="isCountingDown" class="text-center">
+                <p class="text-6xl font-medium text-gray-400 mb-8">Bersiaplah...</p>
+                <p class="text-[20rem] font-black" x-text="countdownValue"></p>
+            </div>
+            <!-- Shuffling in Presentation Mode -->
+            <div x-show="isPicking" class="text-center w-full">
+                <p class="text-6xl font-medium text-gray-400 mb-8">Memilih...</p>
+                <p class="text-9xl font-bold truncate" x-text="shufflingName"></p>
+            </div>
+            <!-- Winners in Presentation Mode -->
+            <div x-show="lastWinners.length > 0 && !isPicking && !isCountingDown" class="w-full h-full flex flex-col justify-center" x-transition>
+                 <h2 class="text-5xl font-bold text-green-400 mb-8 tracking-wider uppercase text-center">PEMENANG!</h2>
+                 <div class="flex-grow flex items-center justify-center w-full">
+                    <div class="w-full text-center" :class="winnerContainerClass()">
+                        <template x-for="winner in lastWinners" :key="winner">
+                             <div class="p-4 rounded-lg bg-gray-800 break-words">
+                                <span :class="winnerTextClass().replace('text-6xl', 'text-8xl').replace('text-4xl', 'text-7xl').replace('text-3xl', 'text-6xl')" x-text="winner"></span>
                             </div>
                         </template>
                     </div>
-                </div>
-                
-                <!-- Action Buttons -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <button 
-                        @click="isHistorySheetOpen = true" 
-                        class="bg-white hover:bg-gray-100 text-gray-800 font-bold py-3 px-4 rounded-lg shadow flex items-center justify-center"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                        </svg>
-                        Lihat Riwayat
-                    </button>
-                    
-                    <button 
-                        @click="enterPresentationMode()" 
-                        class="bg-white hover:bg-gray-100 text-gray-800 font-bold py-3 px-4 rounded-lg shadow flex items-center justify-center"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                        </svg>
-                        Mode Presentasi
-                    </button>
-                    
-                    <button 
-                        @click="toggleSound()" 
-                        class="bg-white hover:bg-gray-100 text-gray-800 font-bold py-3 px-4 rounded-lg shadow flex items-center justify-center"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path x-show="isSoundEnabled" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                            <path x-show="!isSoundEnabled" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                            <path x-show="!isSoundEnabled" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-                        </svg>
-                        <span x-text="isSoundEnabled ? 'Matikan Suara' : 'Nyalakan Suara'"></span>
-                    </button>
-                </div>
+                 </div>
+            </div>
+            <!-- Standby in Presentation Mode -->
+            <div x-show="!isPicking && !isCountingDown && lastWinners.length === 0" class="text-center text-gray-500">
+                <h2 class="text-7xl font-bold mb-4">Pickster</h2>
+                <p class="text-3xl">Tekan <kbd class="px-2 py-1.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-lg">Spasi</kbd> untuk mulai memilih</p>
+                <p class="text-xl mt-2">Tekan <kbd class="px-2 py-1.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-lg">Esc</kbd> untuk keluar</p>
+            </div>
+
+            <!-- Confetti in Presentation Mode -->
+            <div x-show="showConfetti" class="absolute inset-0 pointer-events-none">
+                <template x-for="i in 150" :key="i">
+                   <div class="confetti" 
+                        :style="`width: 15px; height: 15px; left: ${Math.random()*100}%; background-color: hsla(${Math.random()*360}, 100%, 70%, 1); animation-delay: ${Math.random()*2}s;`">
+                   </div>
+                </template>
             </div>
         </div>
-        
-        <!-- History Sheet -->
-        <div 
-            x-show="isHistorySheetOpen" 
-            @click.away="isHistorySheetOpen = false" 
-            class="fixed inset-0 bg-black bg-opacity-50 flex items-end md:items-center justify-center z-50 transition-opacity"
-            style="display: none;"
-        >
-            <div 
-                class="bg-white w-full max-w-2xl max-h-[80vh] rounded-t-2xl md:rounded-2xl shadow-xl overflow-hidden slide-in"
-                @click.stop
-            >
-                <div class="p-4 bg-indigo-600 text-white flex justify-between items-center">
-                    <h3 class="text-xl font-bold">Riwayat Pemenang</h3>
-                    <button @click="isHistorySheetOpen = false" class="text-white hover:text-indigo-200">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
-                
-                <div class="overflow-y-auto max-h-[calc(80vh-60px)]">
-                    <template x-if="winners.length === 0">
-                        <div class="p-8 text-center text-gray-500">
-                            Belum ada riwayat pemenang
-                        </div>
-                    </template>
-                    
-                    <template x-if="winners.length > 0">
-                        <ul class="divide-y">
-                            <template x-for="(timestamp, index) in Object.keys(selectionHistory).reverse()" :key="timestamp">
-                                <li class="p-4">
-                                    <div class="flex justify-between items-center mb-2">
-                                        <span class="font-medium text-gray-500" x-text="new Date(timestamp).toLocaleString()"></span>
-                                        <span class="bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full text-sm">
-                                            <span x-text="selectionHistory[timestamp].length"></span> pemenang
-                                        </span>
-                                    </div>
-                                    <div class="flex flex-wrap gap-2">
-                                        <template x-for="(winner, i) in selectionHistory[timestamp]">
-                                            <span class="bg-gray-100 px-3 py-1 rounded-full" x-text="winner"></span>
-                                        </template>
-                                    </div>
-                                </li>
-                            </template>
-                        </ul>
-                    </template>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Presentation Mode -->
-        <div 
-            x-show="isPresentationMode" 
-            class="fixed inset-0 bg-indigo-900 z-50 flex flex-col items-center justify-center"
-            style="display: none;"
-        >
-            <div class="text-center px-4 w-full max-w-4xl">
-                <template x-if="isCountingDown">
-                    <div class="text-white">
-                        <div class="text-9xl font-bold" x-text="countdownValue"></div>
-                        <p class="text-2xl mt-4">Mempersiapkan pemilihan...</p>
-                    </div>
-                </template>
-                
-                <template x-if="isPicking">
-                    <div class="text-white">
-                        <div class="text-6xl mb-4">Mengacak nama...</div>
-                        <div class="flex justify-center">
-                            <div class="w-16 h-16 border-4 border-white border-t-indigo-300 rounded-full animate-spin"></div>
-                        </div>
-                    </div>
-                </template>
-                
-                <template x-if="!isCountingDown && !isPicking && lastWinners.length > 0">
-                    <div :class="winnerLayoutClass()" class="gap-6">
-                        <template x-for="(winner, index) in lastWinners" :key="index">
-                            <div 
-                                class="bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-bold p-8 rounded-2xl shadow-2xl transform transition hover:scale-105"
-                                x-text="winner"
-                            ></div>
-                        </template>
-                    </div>
-                </template>
-                
-                <template x-if="!isCountingDown && !isPicking && lastWinners.length === 0">
-                    <div class="text-white">
-                        <h2 class="text-4xl mb-4">Siap Memilih Pemenang</h2>
-                        <p class="text-xl">Tekan spasi untuk memulai</p>
-                    </div>
-                </template>
-            </div>
-            
-            <div class="absolute bottom-8 text-white text-center">
-                <p class="mb-2">Tekan spasi untuk memilih pemenang</p>
-                <p>Tekan ESC untuk keluar dari mode presentasi</p>
-            </div>
-        </div>
-        
-        <!-- Confetti Effect -->
-        <template x-if="showConfetti">
-            <div class="fixed inset-0 pointer-events-none z-40">
-                <template x-for="i in 150">
-                    <div 
-                        class="confetti" 
-                        :style="`
-                            left: ${Math.random() * 100}%;
-                            background-color: hsl(${Math.random() * 360}, 100%, 50%);
-                            animation-delay: ${Math.random() * 2}s;
-                        `"
-                    ></div>
-                </template>
-            </div>
-        </template>
-        
-        <!-- Notification -->
-        <div 
-            id="notification" 
-            class="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-indigo-600 text-white px-6 py-3 rounded-full shadow-lg opacity-0 translate-y-4 z-50"
-        ></div>
+
     </div>
-    
-    <!-- Footer -->
-    <footer class="mt-12 text-center text-gray-600 pb-6">
-        <p>Random Name Picker © 2023 - Dibuat dengan Alpine.js dan Tailwind CSS</p>
-    </footer>
 </body>
 </html>
