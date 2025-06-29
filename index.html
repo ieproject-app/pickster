@@ -1,17 +1,17 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="id" :class="darkMode ? 'dark' : ''">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <title>Pickster - Pengundi Nama Sederhana</title>
-  <!-- Tailwind CSS CDN -->
+  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Alpine.js CDN -->
+  <!-- Alpine.js -->
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script>
     document.addEventListener('alpine:init', () => {
       Alpine.data('picksterApp', () => ({
-        // --- State ---
+        // State
         namesInput: '',
         allNames: [],
         availableNames: [],
@@ -28,54 +28,61 @@
         isSoundEnabled: true,
         isHistorySheetOpen: false,
         isPresentationMode: false,
+        darkMode: false,
         savedGroups: {},
         activeGroup: null,
         newGroupName: '',
         selectionHistory: [],
-        // --- Methods ---
+        importingHistory: false,
+        // For accessibility
+        focusPickBtn: false,
+
+        // Methods
         init() {
           // Load state from localStorage
           const state = JSON.parse(localStorage.getItem('picksterState') || '{}');
           Object.assign(this, state);
-          // If allNames is empty, parse from namesInput
-          if (this.allNames.length === 0 && this.namesInput) {
-            this.handleSetNames();
+          if (!Array.isArray(this.selectionHistory)) this.selectionHistory = [];
+          if (!this.namesInput && this.allNames.length > 0) {
+            this.namesInput = this.allNames.join('\n');
           }
+          if (!this.availableNames.length && this.allNames.length) {
+            this.availableNames = [...this.allNames];
+          }
+          // Restore dark mode
+          if (typeof this.darkMode === 'undefined') this.darkMode = false;
+          document.documentElement.classList.toggle('dark', this.darkMode);
         },
         saveState() {
-          // Only save essential state
           const {
             namesInput, allNames, availableNames, winners, lastWinners,
             numWinners, shuffleDuration, countdownDuration, removeAfterPicking,
-            isSoundEnabled, savedGroups, activeGroup, selectionHistory
+            isSoundEnabled, savedGroups, activeGroup, selectionHistory, darkMode
           } = this;
           localStorage.setItem('picksterState', JSON.stringify({
             namesInput, allNames, availableNames, winners, lastWinners,
             numWinners, shuffleDuration, countdownDuration, removeAfterPicking,
-            isSoundEnabled, savedGroups, activeGroup, selectionHistory
+            isSoundEnabled, savedGroups, activeGroup, selectionHistory, darkMode
           }));
+          document.documentElement.classList.toggle('dark', this.darkMode);
         },
         handleSetNames() {
-          // Split lines, trim, remove empty, deduplicate
-          this.allNames = Array.from(
-            new Set(
-              this.namesInput.split('\n')
-                .map(n => n.trim())
-                .filter(n => n.length > 0)
-            )
-          );
-          this.availableNames = [...this.allNames];
-          this.winners = [];
-          this.lastWinners = [];
+          // Split, trim, remove empty, deduplicate
+          const lines = this.namesInput.split('\n').map(n => n.trim()).filter(n => n.length > 0);
+          this.allNames = Array.from(new Set(lines));
+          // Reset available if needed
+          this.availableNames = this.allNames.filter(n => !this.lastWinners.includes(n));
           this.saveState();
         },
         handleSaveGroup() {
-          if (!this.newGroupName.trim()) {
+          const name = this.newGroupName.trim();
+          if (!name) {
             alert('Nama grup tidak boleh kosong.');
             return;
           }
-          this.savedGroups[this.newGroupName] = this.namesInput;
-          this.activeGroup = this.newGroupName;
+          if (this.savedGroups[name] && !confirm('Grup sudah ada. Timpa?')) return;
+          this.savedGroups[name] = this.namesInput;
+          this.activeGroup = name;
           this.newGroupName = '';
           this.saveState();
         },
@@ -90,6 +97,16 @@
           if (confirm(`Hapus grup "${groupName}"?`)) {
             delete this.savedGroups[groupName];
             if (this.activeGroup === groupName) this.activeGroup = null;
+            this.saveState();
+          }
+        },
+        handleRenameGroup(groupName) {
+          const newName = prompt('Nama baru grup:', groupName);
+          if (newName && newName !== groupName) {
+            if (this.savedGroups[newName] && !confirm('Nama sudah ada, timpa?')) return;
+            this.savedGroups[newName] = this.savedGroups[groupName];
+            delete this.savedGroups[groupName];
+            if (this.activeGroup === groupName) this.activeGroup = newName;
             this.saveState();
           }
         },
@@ -121,7 +138,7 @@
           const shuffleTickMs = 100;
           let tempNames = [...this.availableNames];
           let shuffleInterval = setInterval(() => {
-            // Shuffle a bit for animation
+            // Animated shuffle (for visual effect)
             for (let i = tempNames.length - 1; i > 0; i--) {
               const j = Math.floor(Math.random() * (i + 1));
               [tempNames[i], tempNames[j]] = [tempNames[j], tempNames[i]];
@@ -130,12 +147,13 @@
             t += shuffleTickMs/1000;
             if (t >= this.shuffleDuration) {
               clearInterval(shuffleInterval);
-              // Final Fisher-Yates shuffle for fairness
-              for (let i = this.availableNames.length - 1; i > 0; i--) {
+              // Final Fisher-Yates for fairness
+              let arr = [...this.availableNames];
+              for (let i = arr.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
-                [this.availableNames[i], this.availableNames[j]] = [this.availableNames[j], this.availableNames[i]];
+                [arr[i], arr[j]] = [arr[j], arr[i]];
               }
-              this.lastWinners = this.availableNames.slice(0, this.numWinners);
+              this.lastWinners = arr.slice(0, this.numWinners);
               this.winners = [...this.lastWinners];
               // Remove winners if needed
               if (this.removeAfterPicking) {
@@ -146,18 +164,64 @@
                 date: new Date().toISOString(),
                 winners: [...this.lastWinners]
               });
-              if (this.selectionHistory.length > 50) this.selectionHistory.pop();
+              if (this.selectionHistory.length > 100) this.selectionHistory.pop();
               this.isPicking = false;
               this.showConfetti = true;
               if (this.isSoundEnabled) this.playWinnerSound();
-              setTimeout(() => this.showConfetti = false, 4000);
+              setTimeout(() => this.showConfetti = false, 3500);
               this.saveState();
+              this.focusPickBtn = true;
             }
           }, shuffleTickMs);
         },
         resetAvailable() {
-          this.availableNames = [...this.allNames];
+          if (confirm('Reset nama tersisa ke semua nama?')) {
+            this.availableNames = [...this.allNames];
+            this.saveState();
+          }
+        },
+        undoLastWinners() {
+          if (!this.selectionHistory.length) return;
+          const last = this.selectionHistory.shift();
+          this.availableNames = [...this.availableNames, ...last.winners].filter((v, i, arr) => arr.indexOf(v) === i);
+          this.lastWinners = [];
+          this.winners = [];
           this.saveState();
+        },
+        clearHistory() {
+          if (confirm('Hapus seluruh riwayat pemilihan?')) {
+            this.selectionHistory = [];
+            this.saveState();
+          }
+        },
+        exportHistory() {
+          if (!this.selectionHistory.length) return;
+          const data = JSON.stringify(this.selectionHistory, null, 2);
+          const url = URL.createObjectURL(new Blob([data], {type: 'application/json'}));
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'pickster-history.json';
+          a.click();
+          URL.revokeObjectURL(url);
+        },
+        importHistory(event) {
+          const file = event.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            try {
+              const arr = JSON.parse(evt.target.result);
+              if (Array.isArray(arr)) {
+                this.selectionHistory = arr;
+                this.saveState();
+                alert('Berhasil import riwayat.');
+                this.importingHistory = false;
+              }
+            } catch {
+              alert('Gagal import. File tidak valid.');
+            }
+          };
+          reader.readAsText(file);
         },
         togglePresentationMode() {
           this.isPresentationMode = !this.isPresentationMode;
@@ -200,254 +264,276 @@
           } catch {}
         },
         winnerBgColor(idx) {
-          // Return Tailwind bg class for index
           const palette = [
-            'bg-green-300', 'bg-yellow-200', 'bg-blue-200', 'bg-pink-200',
-            'bg-purple-200', 'bg-orange-200', 'bg-emerald-200', 'bg-teal-200'
+            'bg-green-300 dark:bg-green-600', 'bg-yellow-200 dark:bg-yellow-500', 'bg-blue-200 dark:bg-blue-700', 'bg-pink-200 dark:bg-pink-600',
+            'bg-purple-200 dark:bg-purple-700', 'bg-orange-200 dark:bg-orange-500', 'bg-emerald-200 dark:bg-emerald-700', 'bg-teal-200 dark:bg-teal-700'
           ];
           return palette[idx % palette.length];
+        },
+        handleKeydown(e) {
+          // Enter/Space = pick, ESC = close history
+          if (e.key === 'Enter' && !e.shiftKey && !this.isPicking && !this.isCountingDown && document.activeElement.tagName !== 'TEXTAREA') {
+            this.pickWinners();
+            e.preventDefault();
+          }
+          if (e.key === 'Escape') {
+            if (this.isHistorySheetOpen) {
+              this.isHistorySheetOpen = false;
+              e.preventDefault();
+            }
+          }
         }
       }));
     });
   </script>
   <style>
-    /* Confetti animation (pure CSS for simplicity, only for effect) */
-    .confetti {
-      pointer-events: none;
-      position: absolute;
-      width: 100vw;
-      height: 100vh;
-      left: 0; top: 0;
-      z-index: 50;
-      overflow: hidden;
-    }
-    .confetti-piece {
-      position: absolute;
-      width: 12px; height: 18px;
-      border-radius: 3px;
-      opacity: 0.7;
-      animation: confetti-fall 2.9s linear forwards;
-    }
-    @keyframes confetti-fall {
-      0% { transform: translateY(-40px) rotateZ(0deg); }
-      100% { transform: translateY(100vh) rotateZ(360deg); }
-    }
+    .confetti { pointer-events: none; position: absolute; width: 100vw; height: 100vh; left: 0; top: 0; z-index: 50; overflow: hidden;}
+    .confetti-piece { position: absolute; width: 12px; height: 18px; border-radius: 3px; opacity: 0.7; animation: confetti-fall 2.9s linear forwards;}
+    @keyframes confetti-fall {0% { transform: translateY(-40px) rotateZ(0deg);} 100% { transform: translateY(100vh) rotateZ(360deg);}}
+    .dark .confetti-piece { filter: brightness(1.5); }
   </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen transition-colors"
+      x-data="picksterApp"
+      x-init="init()"
+      x-ref="presentationContainer"
+      @keydown.window="handleKeydown($event)"
+>
+  <!-- Confetti Effect -->
+  <div x-show="showConfetti" class="confetti" aria-hidden="true">
+    <template x-for="i in 32" :key="i">
+      <div
+        class="confetti-piece"
+        :style="{
+          left: (Math.random()*100) + 'vw',
+          backgroundColor: ['#fbbf24','#34d399','#818cf8','#a78bfa','#f472b6','#f59e42','#60a5fa','#f87171'][i%8],
+          animationDelay: (Math.random()*0.8)+'s',
+          transform: 'rotate('+(Math.random()*360)+'deg)'
+        }"></div>
+    </template>
+  </div>
+  <!-- HEADER -->
   <div
-    x-data="picksterApp"
-    x-init="init()"
-    x-ref="presentationContainer"
-    :class="isPresentationMode ? 'bg-blue-900 text-white min-h-screen flex flex-col justify-center items-center' : ''"
-    class="relative"
+    class="w-full flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-sm"
+    :class="isPresentationMode ? 'hidden' : ''"
   >
-    <!-- Confetti Effect -->
-    <div x-show="showConfetti" class="confetti" aria-hidden="true">
-      <template x-for="i in 32" :key="i">
-        <div
-          class="confetti-piece"
-          :style="{
-            left: (Math.random()*100) + 'vw',
-            backgroundColor: ['#fbbf24','#34d399','#818cf8','#a78bfa','#f472b6','#f59e42','#60a5fa','#f87171'][i%8],
-            animationDelay: (Math.random()*0.8)+'s',
-            transform: 'rotate('+(Math.random()*360)+'deg)'
-          }"></div>
-      </template>
+    <div class="flex items-center space-x-2">
+      <span class="text-2xl font-bold text-blue-700 dark:text-blue-300">Pickster</span>
+      <span class="text-xs bg-blue-200 text-blue-800 rounded px-2 ml-2">improved</span>
     </div>
-    <!-- HEADER & Presentation Mode Toggle -->
-    <div class="w-full flex items-center justify-between px-4 py-3 bg-white border-b shadow-sm"
-         :class="isPresentationMode ? 'hidden' : ''">
-      <div class="flex items-center space-x-2">
-        <span class="text-2xl font-bold text-blue-700">Pickster</span>
-        <span class="text-xs bg-blue-200 text-blue-800 rounded px-2 ml-2">v1</span>
+    <div class="flex items-center space-x-3">
+      <button @click="togglePresentationMode" class="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 transition">
+        Mode Presentasi
+      </button>
+      <button @click="isHistorySheetOpen = true"
+        class="hover:underline text-gray-600 dark:text-gray-200 px-2">
+        Riwayat
+      </button>
+      <label class="inline-flex items-center ml-2 cursor-pointer">
+        <input type="checkbox" x-model="isSoundEnabled" class="accent-blue-500 mr-1">
+        <span class="text-sm text-gray-700 dark:text-gray-200">Suara</span>
+      </label>
+      <label class="inline-flex items-center ml-2 cursor-pointer">
+        <input type="checkbox" x-model="darkMode" @change="saveState()" class="accent-blue-600 mr-1">
+        <span class="text-sm text-gray-700 dark:text-gray-200">Dark</span>
+      </label>
+      <a target="_blank" href="https://github.com/"
+         class="ml-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" title="GitHub Repo">
+        <svg width="28" height="28" fill="none" viewBox="0 0 24 24"><path fill="currentColor"
+          d="M12 2C6.477 2 2 6.484 2 12.021c0 4.429 2.865 8.185 6.839 9.504.5.092.682-.217.682-.483 0-.238-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.004.071 1.532 1.032 1.532 1.032.892 1.53 2.341 1.088 2.91.832.091-.647.35-1.088.636-1.338-2.22-.253-4.555-1.112-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.104-.253-.447-1.276.098-2.66 0 0 .84-.27 2.75 1.025A9.587 9.587 0 0 1 12 6.844a9.6 9.6 0 0 1 2.506.338c1.91-1.294 2.748-1.025 2.748-1.025.547 1.384.204 2.407.1 2.66.64.7 1.028 1.595 1.028 2.688 0 3.848-2.337 4.695-4.564 4.945.36.311.68.923.68 1.861 0 1.343-.013 2.426-.013 2.756 0 .268.18.579.688.481C19.138 20.203 22 16.448 22 12.021 22 6.484 17.523 2 12 2Z"/></svg>
+      </a>
+    </div>
+  </div>
+  <!-- MAIN LAYOUT -->
+  <div :class="isPresentationMode ? 'w-full h-full flex flex-col items-center justify-center' : 'max-w-6xl mx-auto px-2 py-6 md:grid md:grid-cols-2 gap-8'">
+    <!-- LEFT: Input & Settings -->
+    <div :class="isPresentationMode ? 'hidden' : ''">
+      <!-- Group Management -->
+      <div class="mb-3">
+        <div class="flex items-center gap-2">
+          <input type="text" x-model="newGroupName" placeholder="Nama grup baru"
+            class="border px-2 py-1 rounded text-sm focus:outline-none focus:ring dark:bg-gray-800 dark:text-white"
+            @keydown.enter.prevent="handleSaveGroup()"
+          >
+          <button @click="handleSaveGroup()"
+            class="bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 text-sm font-semibold"
+          >Simpan Grup</button>
+        </div>
+        <div class="flex flex-wrap gap-2 mt-2">
+          <template x-for="(val, name) in savedGroups" :key="name">
+            <span class="flex items-center bg-gray-200 dark:bg-gray-700 rounded px-2 py-1 text-xs">
+              <button @click="handleLoadGroup(name)"
+                :class="activeGroup===name ? 'font-bold text-blue-700 dark:text-blue-200 underline' : 'hover:underline text-blue-600 dark:text-blue-300'"
+                class="mr-1"
+                x-text="name"></button>
+              <button @click="handleRenameGroup(name)" class="ml-1 text-gray-500 hover:text-yellow-600" title="Rename">✎</button>
+              <button @click="handleDeleteGroup(name)" class="ml-1 text-red-500 hover:text-red-700" title="Hapus">×</button>
+            </span>
+          </template>
+        </div>
       </div>
-      <div class="flex items-center space-x-3">
-        <button @click="togglePresentationMode" class="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 transition">
-          Mode Presentasi
+      <!-- NAMA INPUT -->
+      <div class="mb-4">
+        <label class="font-semibold text-gray-700 dark:text-gray-200">Daftar Nama:</label>
+        <textarea
+          x-model="namesInput"
+          @input="handleSetNames()"
+          placeholder="Masukkan satu nama per baris..."
+          rows="7"
+          class="w-full border rounded p-2 mt-1 focus:ring focus:outline-none text-sm bg-white dark:bg-gray-800 dark:text-white"
+          :class="allNames.length !== new Set(allNames).size ? 'border-red-400' : 'border-gray-200 dark:border-gray-700'"
+        ></textarea>
+        <div class="text-sm mt-1 flex flex-wrap gap-3 items-center">
+          <span class="text-gray-500 dark:text-gray-400">Total nama: <span x-text="allNames.length"></span></span>
+          <span class="text-blue-700 dark:text-blue-200">Tersisa: <span x-text="availableNames.length"></span></span>
+          <button @click="resetAvailable()" class="text-blue-600 dark:text-blue-300 hover:underline">Reset Tersisa</button>
+          <span x-show="allNames.length !== new Set(allNames).size" class="text-red-500 font-semibold">Duplikat terdeteksi!</span>
+        </div>
+      </div>
+      <!-- Pengaturan -->
+      <div class="grid grid-cols-2 gap-4 mb-6">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">Jumlah Pemenang</label>
+          <input type="number" min="1" :max="availableNames.length"
+            x-model.number="numWinners"
+            class="border rounded w-full py-1 px-2 mt-1 text-center focus:outline-none focus:ring dark:bg-gray-800 dark:text-white"
+          >
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">Countdown (detik)</label>
+          <input type="number" min="0" x-model.number="countdownDuration"
+            class="border rounded w-full py-1 px-2 mt-1 text-center focus:outline-none focus:ring dark:bg-gray-800 dark:text-white"
+          >
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">Durasi Shuffle (detik)</label>
+          <input type="number" min="1" max="10" x-model.number="shuffleDuration"
+            class="border rounded w-full py-1 px-2 mt-1 text-center focus:outline-none focus:ring dark:bg-gray-800 dark:text-white"
+          >
+        </div>
+        <div class="flex items-center mt-5">
+          <input type="checkbox" x-model="removeAfterPicking" id="removeAfter" class="accent-blue-500">
+          <label for="removeAfter" class="ml-2 text-sm text-gray-700 dark:text-gray-200">Hapus setelah menang</label>
+        </div>
+      </div>
+      <button
+        @click="pickWinners()"
+        x-ref="pickBtn"
+        :disabled="isPicking || isCountingDown || availableNames.length === 0"
+        class="w-full py-2 rounded text-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+        :class="isPicking || isCountingDown || availableNames.length === 0 ? 'opacity-60' : ''"
+        :autofocus="focusPickBtn"
+        @animationend="focusPickBtn = false"
+      >
+        <template x-if="isCountingDown">
+          <span>Mengundi... (<span x-text="countdown"></span>)</span>
+        </template>
+        <template x-if="!isCountingDown && !isPicking">
+          <span>Pick! <span class="ml-2 text-xs font-normal text-yellow-300 dark:text-yellow-200">(Enter)</span></span>
+        </template>
+        <template x-if="isPicking">
+          <span>Mengocok...</span>
+        </template>
+      </button>
+      <button
+        @click="undoLastWinners()"
+        :disabled="selectionHistory.length === 0"
+        class="w-full mt-2 py-1 rounded text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-60"
+      >Undo Pemenang Terakhir</button>
+    </div>
+    <!-- RIGHT: Output / Pemenang -->
+    <div class="flex flex-col items-center justify-center min-h-[350px]">
+      <div class="mb-4 flex w-full justify-between">
+        <div class="flex-1">
+          <span class="text-md font-semibold text-gray-600 dark:text-gray-200">Pemenang:</span>
+        </div>
+        <div>
+          <button @click="togglePresentationMode" x-show="!isPresentationMode"
+            class="px-2 py-1 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs hover:bg-gray-300 dark:hover:bg-gray-600">
+            Mode Presentasi
+          </button>
+          <button @click="togglePresentationMode" x-show="isPresentationMode"
+            class="px-2 py-1 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs hover:bg-gray-300 dark:hover:bg-gray-600">
+            Kembali
+          </button>
+        </div>
+      </div>
+      <!-- Winners Display -->
+      <div
+        :class="[
+          lastWinners.length > 4 ? 'grid grid-cols-2 md:grid-cols-3 gap-3' : 'flex flex-col gap-4 items-center',
+          isPresentationMode ? 'w-full' : 'w-full md:w-3/4'
+        ]"
+        class="mt-2 transition-all min-h-[120px]"
+      >
+        <template x-if="lastWinners.length === 0">
+          <div class="text-gray-400 text-center w-full">Belum ada pemenang.</div>
+        </template>
+        <template x-for="(winner, idx) in lastWinners" :key="winner">
+          <div
+            :class="[
+              'shadow-xl rounded-lg transition-all duration-300',
+              isPresentationMode
+                ? 'text-2xl md:text-3xl font-bold bg-opacity-80 flex items-center justify-center py-6 px-8 mb-2 text-white'
+                : 'text-lg font-semibold rounded px-4 py-2',
+              winnerBgColor(idx)
+            ]"
+            x-text="winner"
+          ></div>
+        </template>
+      </div>
+      <div class="mt-6 text-sm text-gray-400 dark:text-gray-300" x-show="isPresentationMode">
+        Sisa nama: <span x-text="availableNames.length"></span>
+      </div>
+    </div>
+  </div>
+  <!-- Sheet Riwayat -->
+  <div
+    x-show="isHistorySheetOpen"
+    @keydown.escape.window="isHistorySheetOpen = false"
+    class="fixed inset-0 bg-black bg-opacity-40 z-40 flex items-end md:items-center justify-center transition"
+    style="backdrop-filter: blur(2px);"
+  >
+    <div class="bg-white dark:bg-gray-800 rounded-t-2xl md:rounded-2xl shadow-lg w-full md:w-[440px] max-h-[90vh] p-6 overflow-y-auto transition"
+         @click.away="isHistorySheetOpen = false">
+      <div class="flex items-center justify-between mb-4">
+        <span class="font-bold text-lg text-blue-700 dark:text-blue-200">Riwayat Pemilihan</span>
+        <button @click="isHistorySheetOpen=false"
+          class="text-xl text-gray-400 hover:text-red-500">&times;</button>
+      </div>
+      <div class="flex gap-2 mb-4 items-center">
+        <button @click="clearHistory()" :disabled="selectionHistory.length === 0"
+          class="bg-red-100 dark:bg-red-700 text-red-700 dark:text-red-200 py-1 px-2 text-xs font-bold rounded hover:bg-red-200 dark:hover:bg-red-600 disabled:opacity-40">
+          Hapus Riwayat
         </button>
-        <button @click="isHistorySheetOpen = true"
-          class="hover:underline text-gray-600 px-2">
-          Riwayat
+        <button @click="exportHistory()" :disabled="selectionHistory.length === 0"
+          class="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 py-1 px-2 text-xs rounded hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-40">
+          Export
         </button>
-        <label class="inline-flex items-center ml-3 cursor-pointer">
-          <input type="checkbox" x-model="isSoundEnabled" class="accent-blue-500 mr-1">
-          <span class="text-sm text-gray-700">Suara</span>
+        <label class="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 py-1 px-2 text-xs rounded hover:bg-gray-300 dark:hover:bg-gray-600 cursor-pointer">
+          Import
+          <input type="file" accept=".json" @change="importHistory($event)" class="hidden">
         </label>
-        <a target="_blank" href="https://github.com/"
-           class="ml-4 text-gray-400 hover:text-gray-600" title="GitHub Repo">
-          <svg width="28" height="28" fill="none" viewBox="0 0 24 24"><path fill="currentColor"
-            d="M12 2C6.477 2 2 6.484 2 12.021c0 4.429 2.865 8.185 6.839 9.504.5.092.682-.217.682-.483 0-.238-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.004.071 1.532 1.032 1.532 1.032.892 1.53 2.341 1.088 2.91.832.091-.647.35-1.088.636-1.338-2.22-.253-4.555-1.112-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.104-.253-.447-1.276.098-2.66 0 0 .84-.27 2.75 1.025A9.587 9.587 0 0 1 12 6.844a9.6 9.6 0 0 1 2.506.338c1.91-1.294 2.748-1.025 2.748-1.025.547 1.384.204 2.407.1 2.66.64.7 1.028 1.595 1.028 2.688 0 3.848-2.337 4.695-4.564 4.945.36.311.68.923.68 1.861 0 1.343-.013 2.426-.013 2.756 0 .268.18.579.688.481C19.138 20.203 22 16.448 22 12.021 22 6.484 17.523 2 12 2Z"/></svg>
-        </a>
       </div>
-    </div>
-    <!-- MAIN LAYOUT -->
-    <div :class="isPresentationMode ? 'w-full h-full flex flex-col items-center justify-center' : 'max-w-6xl mx-auto px-4 py-8 grid md:grid-cols-2 gap-8'">
-      <!-- LEFT: Input & Settings -->
-      <div :class="isPresentationMode ? 'hidden' : ''">
-        <!-- Group Management -->
-        <div class="mb-4">
-          <div class="flex items-center gap-2">
-            <input type="text" x-model="newGroupName" placeholder="Nama grup baru"
-              class="border px-2 py-1 rounded text-sm focus:outline-none focus:ring"
-            >
-            <button @click="handleSaveGroup()"
-              class="bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 text-sm font-semibold"
-            >Simpan Grup</button>
-          </div>
-          <div class="flex flex-wrap gap-2 mt-2">
-            <template x-for="(val, name) in savedGroups" :key="name">
-              <span class="flex items-center bg-gray-200 rounded px-2 py-1 text-xs">
-                <button @click="handleLoadGroup(name)"
-                  :class="activeGroup===name ? 'font-bold text-blue-700 underline' : 'hover:underline text-blue-600'"
-                  class="mr-1"
-                  x-text="name"></button>
-                <button @click="handleDeleteGroup(name)" class="ml-1 text-red-500 hover:text-red-700" title="Hapus">
-                  ×
-                </button>
-              </span>
+      <template x-if="selectionHistory.length === 0">
+        <div class="text-gray-400">Belum ada riwayat.</div>
+      </template>
+      <template x-for="(entry, idx) in selectionHistory" :key="entry.date + idx">
+        <div class="mb-3 border-b border-gray-100 dark:border-gray-700 pb-2">
+          <div class="text-xs text-gray-400 dark:text-gray-300" x-text="(new Date(entry.date)).toLocaleString('id-ID',{hour12:false})"></div>
+          <div class="flex flex-wrap gap-2 mt-1">
+            <template x-for="winner in entry.winners" :key="winner">
+              <span class="bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded px-3 py-1 text-sm font-semibold"
+                    x-text="winner"></span>
             </template>
           </div>
         </div>
-        <!-- NAMA INPUT -->
-        <div class="mb-4">
-          <label class="font-semibold text-gray-700">Daftar Nama:</label>
-          <textarea
-            x-model="namesInput"
-            @input="handleSetNames()"
-            placeholder="Masukkan satu nama per baris..."
-            rows="7"
-            class="w-full border rounded p-2 mt-1 focus:ring focus:outline-none text-sm bg-white"
-          ></textarea>
-          <div class="text-sm text-gray-500 mt-1">
-            Total nama: <span x-text="allNames.length"></span>
-            | Tersisa: <span x-text="availableNames.length"></span>
-            <button @click="resetAvailable()" class="ml-3 text-blue-600 hover:underline">Reset Tersisa</button>
-          </div>
-        </div>
-        <!-- Pengaturan -->
-        <div class="grid grid-cols-2 gap-4 mb-6">
-          <div>
-            <label class="block text-sm font-medium text-gray-700">Jumlah Pemenang</label>
-            <input type="number" min="1" :max="availableNames.length"
-              x-model.number="numWinners"
-              class="border rounded w-full py-1 px-2 mt-1 text-center focus:outline-none focus:ring"
-            >
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700">Countdown (detik)</label>
-            <input type="number" min="0" x-model.number="countdownDuration"
-              class="border rounded w-full py-1 px-2 mt-1 text-center focus:outline-none focus:ring"
-            >
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700">Durasi Shuffle (detik)</label>
-            <input type="number" min="1" max="10" x-model.number="shuffleDuration"
-              class="border rounded w-full py-1 px-2 mt-1 text-center focus:outline-none focus:ring"
-            >
-          </div>
-          <div class="flex items-center mt-5">
-            <input type="checkbox" x-model="removeAfterPicking" id="removeAfter" class="accent-blue-500">
-            <label for="removeAfter" class="ml-2 text-sm text-gray-700">Hapus setelah menang</label>
-          </div>
-        </div>
-        <button
-          @click="pickWinners()"
-          :disabled="isPicking || isCountingDown || availableNames.length === 0"
-          class="w-full py-2 rounded text-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <template x-if="isCountingDown">
-            <span>Mengundi... (<span x-text="countdown"></span>)</span>
-          </template>
-          <template x-if="!isCountingDown && !isPicking">
-            <span>Pick!</span>
-          </template>
-          <template x-if="isPicking">
-            <span>Mengocok...</span>
-          </template>
-        </button>
-      </div>
-      <!-- RIGHT: Output / Pemenang -->
-      <div class="flex flex-col items-center justify-center min-h-[350px]">
-        <div class="mb-4 flex w-full justify-between">
-          <div class="flex-1">
-            <span class="text-md font-semibold text-gray-600" :class="isPresentationMode ? 'text-gray-200' : ''">Pemenang:</span>
-          </div>
-          <div>
-            <button @click="togglePresentationMode" x-show="!isPresentationMode"
-              class="px-2 py-1 rounded bg-gray-200 text-gray-700 text-xs hover:bg-gray-300">
-              Mode Presentasi
-            </button>
-            <button @click="togglePresentationMode" x-show="isPresentationMode"
-              class="px-2 py-1 rounded bg-gray-200 text-gray-700 text-xs hover:bg-gray-300">
-              Kembali
-            </button>
-          </div>
-        </div>
-        <!-- Winners Display -->
-        <div
-          :class="[
-            lastWinners.length > 4 ? 'grid grid-cols-2 md:grid-cols-3 gap-3' : 'flex flex-col gap-4 items-center',
-            isPresentationMode ? 'w-full' : 'w-full md:w-3/4'
-          ]"
-          class="mt-2 transition-all min-h-[120px]"
-        >
-          <template x-if="lastWinners.length === 0">
-            <div class="text-gray-400 text-center w-full">Belum ada pemenang.</div>
-          </template>
-          <template x-for="(winner, idx) in lastWinners" :key="winner">
-            <div
-              :class="[
-                isPresentationMode
-                  ? 'text-2xl md:text-3xl font-bold shadow-xl rounded-lg bg-opacity-70 flex items-center justify-center'
-                  : 'text-lg font-semibold rounded px-4 py-2',
-                winnerBgColor(idx),
-                isPresentationMode ? 'py-6 px-8 mb-2 text-white' : ''
-              ]"
-              x-text="winner"
-            ></div>
-          </template>
-        </div>
-        <!-- Available Names Left -->
-        <div class="mt-6 text-sm text-gray-400" x-show="isPresentationMode">
-          Sisa nama: <span x-text="availableNames.length"></span>
-        </div>
-      </div>
+      </template>
     </div>
-    <!-- Sheet Riwayat -->
-    <div
-      x-show="isHistorySheetOpen"
-      @keydown.escape.window="isHistorySheetOpen = false"
-      class="fixed inset-0 bg-black bg-opacity-40 z-40 flex items-end md:items-center justify-center"
-      style="backdrop-filter: blur(2px);"
-    >
-      <div class="bg-white rounded-t-2xl md:rounded-2xl shadow-lg w-full md:w-[440px] max-h-[90vh] p-6 overflow-y-auto"
-           @click.away="isHistorySheetOpen = false">
-        <div class="flex items-center justify-between mb-4">
-          <span class="font-bold text-lg text-blue-700">Riwayat Pemilihan</span>
-          <button @click="isHistorySheetOpen=false"
-            class="text-xl text-gray-400 hover:text-red-500">&times;</button>
-        </div>
-        <template x-if="selectionHistory.length === 0">
-          <div class="text-gray-400">Belum ada riwayat.</div>
-        </template>
-        <template x-for="(entry, idx) in selectionHistory" :key="entry.date + idx">
-          <div class="mb-3 border-b pb-2">
-            <div class="text-xs text-gray-400" x-text="(new Date(entry.date)).toLocaleString('id-ID',{hour12:false})"></div>
-            <div class="flex flex-wrap gap-2 mt-1">
-              <template x-for="winner in entry.winners" :key="winner">
-                <span class="bg-blue-100 text-blue-800 rounded px-3 py-1 text-sm font-semibold"
-                      x-text="winner"></span>
-              </template>
-            </div>
-          </div>
-        </template>
-      </div>
-    </div>
-    <!-- FOOTER -->
-    <footer :class="isPresentationMode ? 'hidden' : ''" class="mt-8 text-center text-xs text-gray-400 py-4">
-      Pickster &copy; 2025 &mdash; <a href="https://github.com/" class="underline hover:text-blue-700">GitHub</a>
-    </footer>
   </div>
+  <!-- FOOTER -->
+  <footer :class="isPresentationMode ? 'hidden' : ''" class="mt-8 text-center text-xs text-gray-400 py-4 dark:text-gray-500">
+    Pickster &copy; 2025 &mdash; <a href="https://github.com/" class="underline hover:text-blue-700 dark:hover:text-blue-200">GitHub</a>
+  </footer>
 </body>
 </html>
