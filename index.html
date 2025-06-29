@@ -1,112 +1,453 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Pickster - Random Name Picker</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Pickster - Pengundi Nama Sederhana</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Alpine.js CDN -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script>
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('picksterApp', () => ({
+        // --- State ---
+        namesInput: '',
+        allNames: [],
+        availableNames: [],
+        winners: [],
+        lastWinners: [],
+        numWinners: 1,
+        shuffleDuration: 3,
+        countdownDuration: 3,
+        removeAfterPicking: true,
+        isPicking: false,
+        isCountingDown: false,
+        countdown: 0,
+        showConfetti: false,
+        isSoundEnabled: true,
+        isHistorySheetOpen: false,
+        isPresentationMode: false,
+        savedGroups: {},
+        activeGroup: null,
+        newGroupName: '',
+        selectionHistory: [],
+        // --- Methods ---
+        init() {
+          // Load state from localStorage
+          const state = JSON.parse(localStorage.getItem('picksterState') || '{}');
+          Object.assign(this, state);
+          // If allNames is empty, parse from namesInput
+          if (this.allNames.length === 0 && this.namesInput) {
+            this.handleSetNames();
+          }
+        },
+        saveState() {
+          // Only save essential state
+          const {
+            namesInput, allNames, availableNames, winners, lastWinners,
+            numWinners, shuffleDuration, countdownDuration, removeAfterPicking,
+            isSoundEnabled, savedGroups, activeGroup, selectionHistory
+          } = this;
+          localStorage.setItem('picksterState', JSON.stringify({
+            namesInput, allNames, availableNames, winners, lastWinners,
+            numWinners, shuffleDuration, countdownDuration, removeAfterPicking,
+            isSoundEnabled, savedGroups, activeGroup, selectionHistory
+          }));
+        },
+        handleSetNames() {
+          // Split lines, trim, remove empty, deduplicate
+          this.allNames = Array.from(
+            new Set(
+              this.namesInput.split('\n')
+                .map(n => n.trim())
+                .filter(n => n.length > 0)
+            )
+          );
+          this.availableNames = [...this.allNames];
+          this.winners = [];
+          this.lastWinners = [];
+          this.saveState();
+        },
+        handleSaveGroup() {
+          if (!this.newGroupName.trim()) {
+            alert('Nama grup tidak boleh kosong.');
+            return;
+          }
+          this.savedGroups[this.newGroupName] = this.namesInput;
+          this.activeGroup = this.newGroupName;
+          this.newGroupName = '';
+          this.saveState();
+        },
+        handleLoadGroup(groupName) {
+          if (!(groupName in this.savedGroups)) return;
+          this.namesInput = this.savedGroups[groupName];
+          this.activeGroup = groupName;
+          this.handleSetNames();
+          this.saveState();
+        },
+        handleDeleteGroup(groupName) {
+          if (confirm(`Hapus grup "${groupName}"?`)) {
+            delete this.savedGroups[groupName];
+            if (this.activeGroup === groupName) this.activeGroup = null;
+            this.saveState();
+          }
+        },
+        pickWinners() {
+          if (this.isPicking || this.isCountingDown) return;
+          if (this.availableNames.length === 0) {
+            alert('Tidak ada nama tersisa.');
+            return;
+          }
+          if (this.numWinners > this.availableNames.length) {
+            alert('Jumlah pemenang melebihi jumlah nama yang tersedia.');
+            return;
+          }
+          this.isCountingDown = true;
+          this.countdown = this.countdownDuration;
+          let tickInterval = setInterval(() => {
+            if (this.isSoundEnabled) this.playTickSound();
+            this.countdown--;
+            if (this.countdown <= 0) {
+              clearInterval(tickInterval);
+              this.isCountingDown = false;
+              this._startShuffleAndPick();
+            }
+          }, 1000);
+        },
+        _startShuffleAndPick() {
+          this.isPicking = true;
+          let t = 0;
+          const shuffleTickMs = 100;
+          let tempNames = [...this.availableNames];
+          let shuffleInterval = setInterval(() => {
+            // Shuffle a bit for animation
+            for (let i = tempNames.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [tempNames[i], tempNames[j]] = [tempNames[j], tempNames[i]];
+            }
+            this.winners = tempNames.slice(0, this.numWinners);
+            t += shuffleTickMs/1000;
+            if (t >= this.shuffleDuration) {
+              clearInterval(shuffleInterval);
+              // Final Fisher-Yates shuffle for fairness
+              for (let i = this.availableNames.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [this.availableNames[i], this.availableNames[j]] = [this.availableNames[j], this.availableNames[i]];
+              }
+              this.lastWinners = this.availableNames.slice(0, this.numWinners);
+              this.winners = [...this.lastWinners];
+              // Remove winners if needed
+              if (this.removeAfterPicking) {
+                this.availableNames = this.availableNames.filter(n => !this.lastWinners.includes(n));
+              }
+              // Save to history
+              this.selectionHistory.unshift({
+                date: new Date().toISOString(),
+                winners: [...this.lastWinners]
+              });
+              if (this.selectionHistory.length > 50) this.selectionHistory.pop();
+              this.isPicking = false;
+              this.showConfetti = true;
+              if (this.isSoundEnabled) this.playWinnerSound();
+              setTimeout(() => this.showConfetti = false, 4000);
+              this.saveState();
+            }
+          }, shuffleTickMs);
+        },
+        resetAvailable() {
+          this.availableNames = [...this.allNames];
+          this.saveState();
+        },
+        togglePresentationMode() {
+          this.isPresentationMode = !this.isPresentationMode;
+          this.$nextTick(() => {
+            const el = this.$refs.presentationContainer;
+            if (this.isPresentationMode && el.requestFullscreen) {
+              el.requestFullscreen();
+            } else if (!this.isPresentationMode && document.fullscreenElement) {
+              document.exitFullscreen();
+            }
+          });
+        },
+        playTickSound() {
+          try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'square';
+            o.frequency.value = 1100;
+            g.gain.value = 0.07;
+            o.connect(g).connect(ctx.destination);
+            o.start();
+            o.stop(ctx.currentTime + 0.08);
+            o.onended = () => ctx.close();
+          } catch {}
+        },
+        playWinnerSound() {
+          try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'triangle';
+            o.frequency.setValueAtTime(660, ctx.currentTime);
+            o.frequency.linearRampToValueAtTime(1320, ctx.currentTime + 0.28);
+            g.gain.value = 0.20;
+            o.connect(g).connect(ctx.destination);
+            o.start();
+            o.stop(ctx.currentTime + 0.4);
+            o.onended = () => ctx.close();
+          } catch {}
+        },
+        winnerBgColor(idx) {
+          // Return Tailwind bg class for index
+          const palette = [
+            'bg-green-300', 'bg-yellow-200', 'bg-blue-200', 'bg-pink-200',
+            'bg-purple-200', 'bg-orange-200', 'bg-emerald-200', 'bg-teal-200'
+          ];
+          return palette[idx % palette.length];
+        }
+      }));
+    });
+  </script>
+  <style>
+    /* Confetti animation (pure CSS for simplicity, only for effect) */
+    .confetti {
+      pointer-events: none;
+      position: absolute;
+      width: 100vw;
+      height: 100vh;
+      left: 0; top: 0;
+      z-index: 50;
+      overflow: hidden;
+    }
+    .confetti-piece {
+      position: absolute;
+      width: 12px; height: 18px;
+      border-radius: 3px;
+      opacity: 0.7;
+      animation: confetti-fall 2.9s linear forwards;
+    }
+    @keyframes confetti-fall {
+      0% { transform: translateY(-40px) rotateZ(0deg); }
+      100% { transform: translateY(100vh) rotateZ(360deg); }
+    }
+  </style>
 </head>
-<body>
-  <header class="app-header">
-    <h1>Pickster</h1>
-    <div class="header-actions">
-      <button id="theme-toggle" title="Toggle Theme" aria-label="Toggle Theme"><span class="icon-sun"></span></button>
-      <button id="sound-toggle" title="Toggle Sound" aria-label="Toggle Sound"><span class="icon-sound-on"></span></button>
-      <button id="presentation-toggle" title="Presentation Mode" aria-label="Presentation Mode"><span class="icon-presentation"></span></button>
+<body class="bg-gray-50 min-h-screen">
+  <div
+    x-data="picksterApp"
+    x-init="init()"
+    x-ref="presentationContainer"
+    :class="isPresentationMode ? 'bg-blue-900 text-white min-h-screen flex flex-col justify-center items-center' : ''"
+    class="relative"
+  >
+    <!-- Confetti Effect -->
+    <div x-show="showConfetti" class="confetti" aria-hidden="true">
+      <template x-for="i in 32" :key="i">
+        <div
+          class="confetti-piece"
+          :style="{
+            left: (Math.random()*100) + 'vw',
+            backgroundColor: ['#fbbf24','#34d399','#818cf8','#a78bfa','#f472b6','#f59e42','#60a5fa','#f87171'][i%8],
+            animationDelay: (Math.random()*0.8)+'s',
+            transform: 'rotate('+(Math.random()*360)+'deg)'
+          }"></div>
+      </template>
     </div>
-  </header>
-  <main class="main-container">
-    <!-- Left Column -->
-    <aside class="left-panel">
-      <div class="tabs">
-        <button id="tab-new-list" class="tab active">New List</button>
-        <button id="tab-saved-groups" class="tab">Saved Groups</button>
+    <!-- HEADER & Presentation Mode Toggle -->
+    <div class="w-full flex items-center justify-between px-4 py-3 bg-white border-b shadow-sm"
+         :class="isPresentationMode ? 'hidden' : ''">
+      <div class="flex items-center space-x-2">
+        <span class="text-2xl font-bold text-blue-700">Pickster</span>
+        <span class="text-xs bg-blue-200 text-blue-800 rounded px-2 ml-2">v1</span>
       </div>
-      <section id="new-list-section" class="tab-content active">
-        <textarea id="names-input" rows="10" placeholder="Enter names, one per line..."></textarea>
-        <button id="set-list-btn" class="primary-btn">Set as Current List</button>
-      </section>
-      <section id="saved-groups-section" class="tab-content">
-        <div id="saved-groups-list"></div>
-      </section>
-      <div class="accordion">
-        <button class="accordion-toggle" id="settings-toggle">
-          Settings <span class="arrow">&#9660;</span>
+      <div class="flex items-center space-x-3">
+        <button @click="togglePresentationMode" class="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 transition">
+          Mode Presentasi
         </button>
-        <div class="accordion-content" id="settings-content">
-          <label>
-            Winners
-            <input type="number" min="1" value="1" id="num-winners" />
-          </label>
-          <label>
-            Animation Duration (sec)
-            <input type="number" min="1" max="10" value="3" id="animation-duration" />
-          </label>
-          <label>
-            Countdown (sec)
-            <input type="number" min="1" max="10" value="3" id="countdown-duration" />
-          </label>
-          <label class="toggle-label">
-            Remove after picking
-            <input type="checkbox" id="remove-after-pick" />
-            <span class="toggle-switch"></span>
-          </label>
-          <div class="dropdown">
-            <button class="dropdown-btn" id="more-actions-btn">More Actions &#x25BC;</button>
-            <div class="dropdown-content" id="more-actions-menu">
-              <label class="dropdown-item">
-                Import from .txt
-                <input type="file" id="import-txt" accept=".txt" style="display:none" />
-              </label>
-              <button class="dropdown-item" id="export-txt">Export to .txt</button>
-              <button class="dropdown-item" id="clear-everything">Clear Everything</button>
-            </div>
+        <button @click="isHistorySheetOpen = true"
+          class="hover:underline text-gray-600 px-2">
+          Riwayat
+        </button>
+        <label class="inline-flex items-center ml-3 cursor-pointer">
+          <input type="checkbox" x-model="isSoundEnabled" class="accent-blue-500 mr-1">
+          <span class="text-sm text-gray-700">Suara</span>
+        </label>
+        <a target="_blank" href="https://github.com/"
+           class="ml-4 text-gray-400 hover:text-gray-600" title="GitHub Repo">
+          <svg width="28" height="28" fill="none" viewBox="0 0 24 24"><path fill="currentColor"
+            d="M12 2C6.477 2 2 6.484 2 12.021c0 4.429 2.865 8.185 6.839 9.504.5.092.682-.217.682-.483 0-.238-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.004.071 1.532 1.032 1.532 1.032.892 1.53 2.341 1.088 2.91.832.091-.647.35-1.088.636-1.338-2.22-.253-4.555-1.112-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.104-.253-.447-1.276.098-2.66 0 0 .84-.27 2.75 1.025A9.587 9.587 0 0 1 12 6.844a9.6 9.6 0 0 1 2.506.338c1.91-1.294 2.748-1.025 2.748-1.025.547 1.384.204 2.407.1 2.66.64.7 1.028 1.595 1.028 2.688 0 3.848-2.337 4.695-4.564 4.945.36.311.68.923.68 1.861 0 1.343-.013 2.426-.013 2.756 0 .268.18.579.688.481C19.138 20.203 22 16.448 22 12.021 22 6.484 17.523 2 12 2Z"/></svg>
+        </a>
+      </div>
+    </div>
+    <!-- MAIN LAYOUT -->
+    <div :class="isPresentationMode ? 'w-full h-full flex flex-col items-center justify-center' : 'max-w-6xl mx-auto px-4 py-8 grid md:grid-cols-2 gap-8'">
+      <!-- LEFT: Input & Settings -->
+      <div :class="isPresentationMode ? 'hidden' : ''">
+        <!-- Group Management -->
+        <div class="mb-4">
+          <div class="flex items-center gap-2">
+            <input type="text" x-model="newGroupName" placeholder="Nama grup baru"
+              class="border px-2 py-1 rounded text-sm focus:outline-none focus:ring"
+            >
+            <button @click="handleSaveGroup()"
+              class="bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 text-sm font-semibold"
+            >Simpan Grup</button>
+          </div>
+          <div class="flex flex-wrap gap-2 mt-2">
+            <template x-for="(val, name) in savedGroups" :key="name">
+              <span class="flex items-center bg-gray-200 rounded px-2 py-1 text-xs">
+                <button @click="handleLoadGroup(name)"
+                  :class="activeGroup===name ? 'font-bold text-blue-700 underline' : 'hover:underline text-blue-600'"
+                  class="mr-1"
+                  x-text="name"></button>
+                <button @click="handleDeleteGroup(name)" class="ml-1 text-red-500 hover:text-red-700" title="Hapus">
+                  ×
+                </button>
+              </span>
+            </template>
           </div>
         </div>
+        <!-- NAMA INPUT -->
+        <div class="mb-4">
+          <label class="font-semibold text-gray-700">Daftar Nama:</label>
+          <textarea
+            x-model="namesInput"
+            @input="handleSetNames()"
+            placeholder="Masukkan satu nama per baris..."
+            rows="7"
+            class="w-full border rounded p-2 mt-1 focus:ring focus:outline-none text-sm bg-white"
+          ></textarea>
+          <div class="text-sm text-gray-500 mt-1">
+            Total nama: <span x-text="allNames.length"></span>
+            | Tersisa: <span x-text="availableNames.length"></span>
+            <button @click="resetAvailable()" class="ml-3 text-blue-600 hover:underline">Reset Tersisa</button>
+          </div>
+        </div>
+        <!-- Pengaturan -->
+        <div class="grid grid-cols-2 gap-4 mb-6">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Jumlah Pemenang</label>
+            <input type="number" min="1" :max="availableNames.length"
+              x-model.number="numWinners"
+              class="border rounded w-full py-1 px-2 mt-1 text-center focus:outline-none focus:ring"
+            >
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Countdown (detik)</label>
+            <input type="number" min="0" x-model.number="countdownDuration"
+              class="border rounded w-full py-1 px-2 mt-1 text-center focus:outline-none focus:ring"
+            >
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Durasi Shuffle (detik)</label>
+            <input type="number" min="1" max="10" x-model.number="shuffleDuration"
+              class="border rounded w-full py-1 px-2 mt-1 text-center focus:outline-none focus:ring"
+            >
+          </div>
+          <div class="flex items-center mt-5">
+            <input type="checkbox" x-model="removeAfterPicking" id="removeAfter" class="accent-blue-500">
+            <label for="removeAfter" class="ml-2 text-sm text-gray-700">Hapus setelah menang</label>
+          </div>
+        </div>
+        <button
+          @click="pickWinners()"
+          :disabled="isPicking || isCountingDown || availableNames.length === 0"
+          class="w-full py-2 rounded text-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <template x-if="isCountingDown">
+            <span>Mengundi... (<span x-text="countdown"></span>)</span>
+          </template>
+          <template x-if="!isCountingDown && !isPicking">
+            <span>Pick!</span>
+          </template>
+          <template x-if="isPicking">
+            <span>Mengocok...</span>
+          </template>
+        </button>
       </div>
-    </aside>
-
-    <!-- Right Column -->
-    <section class="right-panel">
-      <div class="result-area" id="result-area">
-        <div id="countdown" class="countdown"></div>
-        <div id="animation" class="animation"></div>
-        <div id="winners-display" class="winners-display"></div>
+      <!-- RIGHT: Output / Pemenang -->
+      <div class="flex flex-col items-center justify-center min-h-[350px]">
+        <div class="mb-4 flex w-full justify-between">
+          <div class="flex-1">
+            <span class="text-md font-semibold text-gray-600" :class="isPresentationMode ? 'text-gray-200' : ''">Pemenang:</span>
+          </div>
+          <div>
+            <button @click="togglePresentationMode" x-show="!isPresentationMode"
+              class="px-2 py-1 rounded bg-gray-200 text-gray-700 text-xs hover:bg-gray-300">
+              Mode Presentasi
+            </button>
+            <button @click="togglePresentationMode" x-show="isPresentationMode"
+              class="px-2 py-1 rounded bg-gray-200 text-gray-700 text-xs hover:bg-gray-300">
+              Kembali
+            </button>
+          </div>
+        </div>
+        <!-- Winners Display -->
+        <div
+          :class="[
+            lastWinners.length > 4 ? 'grid grid-cols-2 md:grid-cols-3 gap-3' : 'flex flex-col gap-4 items-center',
+            isPresentationMode ? 'w-full' : 'w-full md:w-3/4'
+          ]"
+          class="mt-2 transition-all min-h-[120px]"
+        >
+          <template x-if="lastWinners.length === 0">
+            <div class="text-gray-400 text-center w-full">Belum ada pemenang.</div>
+          </template>
+          <template x-for="(winner, idx) in lastWinners" :key="winner">
+            <div
+              :class="[
+                isPresentationMode
+                  ? 'text-2xl md:text-3xl font-bold shadow-xl rounded-lg bg-opacity-70 flex items-center justify-center'
+                  : 'text-lg font-semibold rounded px-4 py-2',
+                winnerBgColor(idx),
+                isPresentationMode ? 'py-6 px-8 mb-2 text-white' : ''
+              ]"
+              x-text="winner"
+            ></div>
+          </template>
+        </div>
+        <!-- Available Names Left -->
+        <div class="mt-6 text-sm text-gray-400" x-show="isPresentationMode">
+          Sisa nama: <span x-text="availableNames.length"></span>
+        </div>
       </div>
-      <div class="action-buttons">
-        <button id="pick-btn" class="primary-btn big">Pick Winner(s)</button>
-        <button id="ai-suggest-btn" class="secondary-btn">AI Suggest</button>
-      </div>
-      <div class="stats-panel">
-        <div>Total Names: <span id="stat-total">0</span></div>
-        <div>Picked: <span id="stat-picked">0</span></div>
-        <div>Available: <span id="stat-available">0</span></div>
-      </div>
-    </section>
-  </main>
-  <footer>
-    <button id="view-history" class="secondary-btn">View History</button>
-  </footer>
-
-  <!-- Modal Overlay for History & AI Suggest -->
-  <div id="modal-overlay" class="modal-overlay hidden">
-    <div class="modal-content" id="modal-content">
-      <button class="modal-close" id="modal-close">&times;</button>
-      <div id="modal-body"></div>
     </div>
-  </div>
-
-  <!-- Presentation Mode -->
-  <div id="presentation-view" class="presentation-view hidden">
-    <div class="presentation-content">
-      <div id="presentation-countdown" class="countdown"></div>
-      <div id="presentation-animation" class="animation"></div>
-      <div id="presentation-winners" class="winners-display"></div>
+    <!-- Sheet Riwayat -->
+    <div
+      x-show="isHistorySheetOpen"
+      @keydown.escape.window="isHistorySheetOpen = false"
+      class="fixed inset-0 bg-black bg-opacity-40 z-40 flex items-end md:items-center justify-center"
+      style="backdrop-filter: blur(2px);"
+    >
+      <div class="bg-white rounded-t-2xl md:rounded-2xl shadow-lg w-full md:w-[440px] max-h-[90vh] p-6 overflow-y-auto"
+           @click.away="isHistorySheetOpen = false">
+        <div class="flex items-center justify-between mb-4">
+          <span class="font-bold text-lg text-blue-700">Riwayat Pemilihan</span>
+          <button @click="isHistorySheetOpen=false"
+            class="text-xl text-gray-400 hover:text-red-500">&times;</button>
+        </div>
+        <template x-if="selectionHistory.length === 0">
+          <div class="text-gray-400">Belum ada riwayat.</div>
+        </template>
+        <template x-for="(entry, idx) in selectionHistory" :key="entry.date + idx">
+          <div class="mb-3 border-b pb-2">
+            <div class="text-xs text-gray-400" x-text="(new Date(entry.date)).toLocaleString('id-ID',{hour12:false})"></div>
+            <div class="flex flex-wrap gap-2 mt-1">
+              <template x-for="winner in entry.winners" :key="winner">
+                <span class="bg-blue-100 text-blue-800 rounded px-3 py-1 text-sm font-semibold"
+                      x-text="winner"></span>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
     </div>
+    <!-- FOOTER -->
+    <footer :class="isPresentationMode ? 'hidden' : ''" class="mt-8 text-center text-xs text-gray-400 py-4">
+      Pickster &copy; 2025 &mdash; <a href="https://github.com/" class="underline hover:text-blue-700">GitHub</a>
+    </footer>
   </div>
-
-  <!-- Lodash for Fisher-Yates Shuffle & utility -->
-  <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script>
-  <script src="script.js"></script>
 </body>
 </html>
