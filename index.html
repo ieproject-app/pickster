@@ -1,617 +1,257 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Random Name Picker</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script>
-        function picksterApp() {
-            return {
-                // Data Properties
-                namesInput: '',
-                allNames: [],
-                availableNames: [],
-                winners: [],
-                lastWinners: [],
-                selectionHistory: {},
-                
-                // Settings
-                numWinners: 1,
-                shuffleDuration: 3,
-                countdownDuration: 3,
-                removeAfterPicking: true,
-                
-                // UI State
-                isPicking: false,
-                isCountingDown: false,
-                countdownValue: 3,
-                showConfetti: false,
-                isSoundEnabled: true,
-                isHistorySheetOpen: false,
-                isPresentationMode: false,
-                
-                // Groups
-                savedGroups: {},
-                activeGroup: null,
-                newGroupName: '',
-                
-                // UI State for tabs
-                activeTab: 'input',
-                
-                // Audio Context (will be initialized on first user interaction)
-                audioContext: null,
-                
-                // Initialization method called when app loads
-                init() {
-                    this.loadStateFromLocalStorage();
-                    this.setupAudioContext();
-                },
-                
-                // Load all data from localStorage
-                loadStateFromLocalStorage() {
-                    const saved = localStorage.getItem('picksterApp');
-                    if (saved) {
-                        const data = JSON.parse(saved);
-                        this.allNames = data.allNames || [];
-                        this.availableNames = data.availableNames || [];
-                        this.winners = data.winners || [];
-                        this.selectionHistory = data.selectionHistory || {};
-                        this.savedGroups = data.savedGroups || {};
-                        this.numWinners = data.numWinners || 1;
-                        this.shuffleDuration = data.shuffleDuration || 3;
-                        this.countdownDuration = data.countdownDuration || 3;
-                        this.removeAfterPicking = data.removeAfterPicking !== undefined ? data.removeAfterPicking : true;
-                        this.isSoundEnabled = data.isSoundEnabled !== undefined ? data.isSoundEnabled : true;
-                    }
-                },
-                
-                // Save current state to localStorage
-                saveStateToLocalStorage() {
-                    const dataToSave = {
-                        allNames: this.allNames,
-                        availableNames: this.availableNames,
-                        winners: this.winners,
-                        selectionHistory: this.selectionHistory,
-                        savedGroups: this.savedGroups,
-                        numWinners: this.numWinners,
-                        shuffleDuration: this.shuffleDuration,
-                        countdownDuration: this.countdownDuration,
-                        removeAfterPicking: this.removeAfterPicking,
-                        isSoundEnabled: this.isSoundEnabled
-                    };
-                    localStorage.setItem('picksterApp', JSON.stringify(dataToSave));
-                },
-                
-                // Setup Audio Context for sound effects
-                setupAudioContext() {
-                    // Audio context will be created on first user interaction due to browser policies
-                },
-                
-                // Create audio context if it doesn't exist
-                createAudioContext() {
-                    if (!this.audioContext) {
-                        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    }
-                },
-                
-                // Play tick sound during countdown
-                playTickSound() {
-                    if (!this.isSoundEnabled) return;
-                    this.createAudioContext();
-                    
-                    const oscillator = this.audioContext.createOscillator();
-                    const gainNode = this.audioContext.createGain();
-                    
-                    oscillator.connect(gainNode);
-                    gainNode.connect(this.audioContext.destination);
-                    
-                    oscillator.frequency.setValueAtTime(800, this.audioContext.currentTime);
-                    gainNode.gain.setValueAtTime(0.1, this.audioContext.currentTime);
-                    gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.1);
-                    
-                    oscillator.start(this.audioContext.currentTime);
-                    oscillator.stop(this.audioContext.currentTime + 0.1);
-                },
-                
-                // Play victory sound when winners are announced
-                playVictorySound() {
-                    if (!this.isSoundEnabled) return;
-                    this.createAudioContext();
-                    
-                    const frequencies = [523.25, 659.25, 783.99, 1046.50]; // C, E, G, C octave
-                    frequencies.forEach((freq, index) => {
-                        const oscillator = this.audioContext.createOscillator();
-                        const gainNode = this.audioContext.createGain();
-                        
-                        oscillator.connect(gainNode);
-                        gainNode.connect(this.audioContext.destination);
-                        
-                        oscillator.frequency.setValueAtTime(freq, this.audioContext.currentTime);
-                        gainNode.gain.setValueAtTime(0.05, this.audioContext.currentTime + index * 0.1);
-                        gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + index * 0.1 + 0.2);
-                        
-                        oscillator.start(this.audioContext.currentTime + index * 0.1);
-                        oscillator.stop(this.audioContext.currentTime + index * 0.1 + 0.2);
-                    });
-                },
-                
-                // Handle setting names from textarea input
-                handleSetNames() {
-                    const names = this.namesInput
-                        .split('\n')
-                        .map(name => name.trim())
-                        .filter(name => name.length > 0);
-                    
-                    // Remove duplicates
-                    this.allNames = [...new Set(names)];
-                    this.availableNames = [...this.allNames];
-                    this.winners = [];
-                    this.lastWinners = [];
-                    this.selectionHistory = {};
-                    
-                    this.saveStateToLocalStorage();
-                },
-                
-                // Fisher-Yates Shuffle Algorithm
-                shuffleArray(array) {
-                    const shuffled = [...array];
-                    for (let i = shuffled.length - 1; i > 0; i--) {
-                        const j = Math.floor(Math.random() * (i + 1));
-                        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-                    }
-                    return shuffled;
-                },
-                
-                // Main picking process
-                async startPickingProcess() {
-                    if (this.availableNames.length < this.numWinners) {
-                        alert('Not enough names available for the number of winners requested!');
-                        return;
-                    }
-                    
-                    this.lastWinners = [];
-                    await this.startCountdown();
-                    await this.startPickingAnimation();
-                },
-                
-                // Countdown phase
-                startCountdown() {
-                    return new Promise((resolve) => {
-                        this.isCountingDown = true;
-                        this.countdownValue = this.countdownDuration;
-                        
-                        const countdownInterval = setInterval(() => {
-                            this.playTickSound();
-                            this.countdownValue--;
-                            
-                            if (this.countdownValue <= 0) {
-                                clearInterval(countdownInterval);
-                                this.isCountingDown = false;
-                                resolve();
-                            }
-                        }, 1000);
-                    });
-                },
-                
-                // Picking animation phase
-                startPickingAnimation() {
-                    return new Promise((resolve) => {
-                        this.isPicking = true;
-                        
-                        // Pre-determine winners using Fisher-Yates shuffle
-                        const shuffled = this.shuffleArray(this.availableNames);
-                        const selectedWinners = shuffled.slice(0, this.numWinners);
-                        
-                        // Animation duration
-                        setTimeout(() => {
-                            this.isPicking = false;
-                            this.lastWinners = selectedWinners;
-                            
-                            // Update winners list and history
-                            this.winners.push(...selectedWinners);
-                            const timestamp = new Date().toISOString();
-                            this.selectionHistory[timestamp] = selectedWinners;
-                            
-                            // Remove winners from available names if setting is enabled
-                            if (this.removeAfterPicking) {
-                                this.availableNames = this.availableNames.filter(
-                                    name => !selectedWinners.includes(name)
-                                );
-                            }
-                            
-                            this.playVictorySound();
-                            this.showConfetti = true;
-                            setTimeout(() => this.showConfetti = false, 3000);
-                            
-                            this.saveStateToLocalStorage();
-                            resolve();
-                        }, this.shuffleDuration * 1000);
-                    });
-                },
-                
-                // Get dynamic classes for winner display based on count
-                getWinnerDisplayClasses() {
-                    const count = this.lastWinners.length;
-                    if (count <= 4) {
-                        return 'flex flex-col space-y-4 text-4xl md:text-6xl';
-                    } else if (count <= 9) {
-                        return 'grid grid-cols-2 md:grid-cols-3 gap-4 text-2xl md:text-3xl';
-                    } else {
-                        return 'grid grid-cols-2 md:grid-cols-4 gap-2 text-lg md:text-xl';
-                    }
-                },
-                
-                // Group management methods
-                handleSaveGroup() {
-                    if (!this.newGroupName.trim() || this.allNames.length === 0) {
-                        alert('Please enter a group name and have names in your list!');
-                        return;
-                    }
-                    
-                    this.savedGroups[this.newGroupName.trim()] = [...this.allNames];
-                    this.newGroupName = '';
-                    this.saveStateToLocalStorage();
-                },
-                
-                handleLoadGroup(groupName) {
-                    this.allNames = [...this.savedGroups[groupName]];
-                    this.availableNames = [...this.allNames];
-                    this.activeGroup = groupName;
-                    this.winners = [];
-                    this.lastWinners = [];
-                    this.selectionHistory = {};
-                    this.saveStateToLocalStorage();
-                },
-                
-                handleDeleteGroup(groupName) {
-                    if (confirm(`Are you sure you want to delete the group "${groupName}"?`)) {
-                        delete this.savedGroups[groupName];
-                        if (this.activeGroup === groupName) {
-                            this.activeGroup = null;
-                        }
-                        this.saveStateToLocalStorage();
-                    }
-                },
-                
-                // Presentation mode methods
-                enterPresentationMode() {
-                    this.isPresentationMode = true;
-                    document.documentElement.requestFullscreen().catch(console.error);
-                },
-                
-                exitPresentationMode() {
-                    this.isPresentationMode = false;
-                    if (document.fullscreenElement) {
-                        document.exitFullscreen().catch(console.error);
-                    }
-                },
-                
-                // Get random name for animation display
-                getRandomName() {
-                    return this.availableNames[Math.floor(Math.random() * this.availableNames.length)] || 'Loading...';
-                },
-                
-                // Get history entries in reverse chronological order
-                getHistoryEntries() {
-                    return Object.entries(this.selectionHistory)
-                        .map(([timestamp, winners]) => ({
-                            timestamp: new Date(timestamp).toLocaleString(),
-                            winners
-                        }))
-                        .reverse();
-                }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Random Name Picker</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Alpine.js CDN -->
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script>
+    function picksterApp() {
+      return {
+        // State & Properties
+        namesInput: '',
+        allNames: [],
+        availableNames: [],
+        winners: [],
+        lastWinners: [],
+        selectionHistory: {},
+        numWinners: 1,
+        shuffleDuration: 3,
+        countdownDuration: 3,
+        removeAfterPicking: true,
+        isPicking: false,
+        isCountingDown: false,
+        countdownValue: 3,
+        showConfetti: false,
+        isSoundEnabled: true,
+        isHistorySheetOpen: false,
+        isPresentationMode: false,
+        savedGroups: {},
+        activeGroup: null,
+        newGroupName: '',
+
+        init() {
+          // Load from localStorage
+          const data = JSON.parse(localStorage.getItem('pickster')) || {};
+          Object.assign(this, data);
+          this.availableNames = [...this.allNames];
+        },
+        saveStateToLocalStorage() {
+          const state = {
+            allNames: this.allNames,
+            winners: this.winners,
+            savedGroups: this.savedGroups,
+            selectionHistory: this.selectionHistory,
+            // include other settings if needed
+            numWinners: this.numWinners,
+            shuffleDuration: this.shuffleDuration,
+            countdownDuration: this.countdownDuration,
+            removeAfterPicking: this.removeAfterPicking
+          };
+          localStorage.setItem('pickster', JSON.stringify(state));
+        },
+        handleSetNames() {
+          const lines = this.namesInput.split('\n').map(n => n.trim()).filter(n => n);
+          this.allNames = [...new Set(lines)];
+          this.availableNames = [...this.allNames];
+          this.winners = [];
+          this.lastWinners = [];
+          this.selectionHistory = {};
+          this.saveStateToLocalStorage();
+        },
+        startPickingProcess() {
+          if (this.availableNames.length < this.numWinners) {
+            alert('Not enough names to pick from.');
+            return;
+          }
+          this.isCountingDown = true;
+          this.countdownValue = this.countdownDuration;
+          const cd = setInterval(() => {
+            this.countdownValue--;
+            if (this.isSoundEnabled) this.generateTickSound();
+            if (this.countdownValue <= 0) {
+              clearInterval(cd);
+              this.isCountingDown = false;
+              // Determine winners via shuffle
+              const copy = [...this.availableNames];
+              this.fisherYates(copy);
+              const picked = copy.slice(0, this.numWinners);
+              // Animate
+              this.isPicking = true;
+              setTimeout(() => {
+                this.isPicking = false;
+                this.lastWinners = picked;
+                this.winners.push(...picked);
+                if (this.removeAfterPicking) this.availableNames = this.availableNames.filter(n => !picked.includes(n));
+                this.selectionHistory[new Date().toISOString()] = picked;
+                if (this.isSoundEnabled) this.generateWinSound();
+                this.showConfetti = true;
+                setTimeout(() => this.showConfetti = false, 3000);
+                this.saveStateToLocalStorage();
+              }, this.shuffleDuration * 1000);
             }
+          }, 1000);
+        },
+        fisherYates(arr) {
+          for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+          }
+        },
+        handleSaveGroup() {
+          if (!this.newGroupName) return;
+          this.savedGroups[this.newGroupName] = [...this.allNames];
+          this.newGroupName = '';
+          this.saveStateToLocalStorage();
+        },
+        handleLoadGroup(name) {
+          this.activeGroup = name;
+          this.allNames = [...this.savedGroups[name]];
+          this.availableNames = [...this.allNames];
+          this.namesInput = this.allNames.join('\n');
+        },
+        handleDeleteGroup(name) {
+          delete this.savedGroups[name];
+          if (this.activeGroup === name) this.activeGroup = null;
+          this.saveStateToLocalStorage();
+        },
+        enterPresentationMode() {
+          this.isPresentationMode = true;
+          this.$nextTick(() => document.documentElement.requestFullscreen());
+        },
+        exitPresentationMode() {
+          this.isPresentationMode = false;
+          document.exitFullscreen();
+        },
+        generateTickSound() {
+          const ctx = new AudioContext();
+          const osc = ctx.createOscillator();
+          osc.type = 'sine'; osc.frequency.value = 1000;
+          osc.connect(ctx.destination);
+          osc.start(); osc.stop(ctx.currentTime + 0.1);
+        },
+        generateWinSound() {
+          const ctx = new AudioContext();
+          const notes = [523, 659, 783];
+          notes.forEach((f, i) => {
+            const osc = ctx.createOscillator();
+            osc.frequency.value = f;
+            osc.connect(ctx.destination);
+            osc.start(ctx.currentTime + i * 0.2);
+            osc.stop(ctx.currentTime + i * 0.2 + 0.2);
+          });
         }
-    </script>
+      };
+    }
+  </script>
 </head>
-<body class="bg-gray-100 min-h-screen">
-    <div x-data="picksterApp()" x-init="init()" 
-         @keydown.window.space.prevent="!isPresentationMode && startPickingProcess()"
-         @keydown.window.escape="exitPresentationMode()"
-         class="container mx-auto p-4">
+<body class="bg-gray-100 min-h-screen p-4">
+  <div x-data="picksterApp()" x-init="init()" class="container mx-auto">
+    <div class="flex flex-col md:flex-row gap-4">
+      <!-- Left Panel: Input & Settings -->
+      <div class="md:w-1/3 bg-white p-4 rounded-lg shadow">
+        <h2 class="text-xl font-semibold mb-2">Input Names</h2>
+        <textarea x-model="namesInput" rows="5" class="w-full p-2 border rounded mb-2" placeholder="Enter one name per line"></textarea>
+        <button @click="handleSetNames()" class="w-full bg-blue-500 text-white p-2 rounded">Set List</button>
         
-        <!-- Header -->
-        <header class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-gray-800 mb-2">🎲 Random Name Picker</h1>
-            <p class="text-gray-600">Pick random winners from your list with style!</p>
-        </header>
-        
-        <!-- Main Content Grid -->
-        <div class="grid lg:grid-cols-2 gap-8">
-            
-            <!-- Left Column: Input and Settings -->
-            <div class="space-y-6">
-                
-                <!-- Tab Navigation -->
-                <div class="flex border-b border-gray-200">
-                    <button @click="activeTab = 'input'" 
-                            :class="activeTab === 'input' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
-                            class="py-2 px-4 border-b-2 font-medium">
-                        Name Input
-                    </button>
-                    <button @click="activeTab = 'groups'" 
-                            :class="activeTab === 'groups' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'"
-                            class="py-2 px-4 border-b-2 font-medium">
-                        Saved Groups
-                    </button>
-                </div>
-                
-                <!-- Name Input Tab -->
-                <div x-show="activeTab === 'input'" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Enter Names (one per line):</label>
-                        <textarea x-model="namesInput" 
-                                  rows="8" 
-                                  placeholder="John Doe&#10;Jane Smith&#10;Mike Johnson&#10;Sarah Wilson"
-                                  class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"></textarea>
-                    </div>
-                    
-                    <button @click="handleSetNames()" 
-                            class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200">
-                        Set Name List
-                    </button>
-                    
-                    <!-- Save Group -->
-                    <div x-show="allNames.length > 0" class="flex gap-2">
-                        <input x-model="newGroupName" 
-                               placeholder="Group name..." 
-                               class="flex-1 p-2 border border-gray-300 rounded-lg">
-                        <button @click="handleSaveGroup()" 
-                                class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
-                            Save Group
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Groups Tab -->
-                <div x-show="activeTab === 'groups'" class="space-y-4">
-                    <div x-show="Object.keys(savedGroups).length === 0" class="text-center text-gray-500 py-8">
-                        No saved groups yet. Create a name list and save it as a group!
-                    </div>
-                    
-                    <div x-show="Object.keys(savedGroups).length > 0">
-                        <template x-for="[groupName, names] in Object.entries(savedGroups)" :key="groupName">
-                            <div class="bg-white p-4 rounded-lg border border-gray-200 flex justify-between items-center">
-                                <div>
-                                    <h3 class="font-medium text-gray-800" x-text="groupName"></h3>
-                                    <p class="text-sm text-gray-500" x-text="`${names.length} names`"></p>
-                                </div>
-                                <div class="flex gap-2">
-                                    <button @click="handleLoadGroup(groupName)" 
-                                            class="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700">
-                                        Load
-                                    </button>
-                                    <button @click="handleDeleteGroup(groupName)" 
-                                            class="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700">
-                                        Delete
-                                    </button>
-                                </div>
-                            </div>
-                        </template>
-                    </div>
-                </div>
-                
-                <!-- Current List Status -->
-                <div x-show="allNames.length > 0" class="bg-white p-4 rounded-lg border border-gray-200">
-                    <h3 class="font-medium text-gray-800 mb-2">Current List Status:</h3>
-                    <div class="grid grid-cols-2 gap-4 text-sm">
-                        <div>Total Names: <span class="font-medium" x-text="allNames.length"></span></div>
-                        <div>Available: <span class="font-medium" x-text="availableNames.length"></span></div>
-                        <div>Winners So Far: <span class="font-medium" x-text="winners.length"></span></div>
-                        <div x-show="activeGroup">Active Group: <span class="font-medium" x-text="activeGroup"></span></div>
-                    </div>
-                </div>
-                
-                <!-- Settings Accordion -->
-                <details class="bg-white rounded-lg border border-gray-200">
-                    <summary class="p-4 cursor-pointer font-medium text-gray-800 hover:bg-gray-50">
-                        ⚙️ Settings
-                    </summary>
-                    <div class="p-4 pt-0 space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Number of Winners:</label>
-                            <input x-model.number="numWinners" 
-                                   type="number" 
-                                   min="1" 
-                                   @change="saveStateToLocalStorage()"
-                                   class="w-full p-2 border border-gray-300 rounded-lg">
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Animation Duration (seconds):</label>
-                            <input x-model.number="shuffleDuration" 
-                                   type="number" 
-                                   min="1" 
-                                   max="10"
-                                   @change="saveStateToLocalStorage()"
-                                   class="w-full p-2 border border-gray-300 rounded-lg">
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Countdown Duration (seconds):</label>
-                            <input x-model.number="countdownDuration" 
-                                   type="number" 
-                                   min="1" 
-                                   max="10"
-                                   @change="saveStateToLocalStorage()"
-                                   class="w-full p-2 border border-gray-300 rounded-lg">
-                        </div>
-                        
-                        <div class="flex items-center">
-                            <input x-model="removeAfterPicking" 
-                                   type="checkbox" 
-                                   id="removeAfterPicking"
-                                   @change="saveStateToLocalStorage()"
-                                   class="mr-2">
-                            <label for="removeAfterPicking" class="text-sm text-gray-700">Remove winners from available names</label>
-                        </div>
-                        
-                        <div class="flex items-center">
-                            <input x-model="isSoundEnabled" 
-                                   type="checkbox" 
-                                   id="soundEnabled"
-                                   @change="saveStateToLocalStorage()"
-                                   class="mr-2">
-                            <label for="soundEnabled" class="text-sm text-gray-700">Enable sound effects</label>
-                        </div>
-                    </div>
-                </details>
-            </div>
-            
-            <!-- Right Column: Picker and Results -->
-            <div class="space-y-6">
-                
-                <!-- Action Buttons -->
-                <div class="flex flex-wrap gap-4">
-                    <button @click="startPickingProcess()" 
-                            :disabled="availableNames.length < numWinners || isPicking || isCountingDown"
-                            :class="availableNames.length < numWinners || isPicking || isCountingDown ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'"
-                            class="flex-1 text-white py-3 px-6 rounded-lg font-medium transition duration-200">
-                        🎲 Pick Winner(s)
-                    </button>
-                    
-                    <button @click="enterPresentationMode()" 
-                            :disabled="allNames.length === 0"
-                            class="bg-purple-600 text-white py-3 px-6 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 transition duration-200">
-                        📺 Present
-                    </button>
-                    
-                    <button @click="isHistorySheetOpen = true" 
-                            :disabled="Object.keys(selectionHistory).length === 0"
-                            class="bg-gray-600 text-white py-3 px-6 rounded-lg hover:bg-gray-700 disabled:bg-gray-400 transition duration-200">
-                        📜 History
-                    </button>
-                </div>
-                
-                <!-- Picker Display Area -->
-                <div class="bg-white rounded-lg border-2 border-gray-200 p-8 min-h-64 flex items-center justify-center relative overflow-hidden">
-                    
-                    <!-- Countdown Display -->
-                    <div x-show="isCountingDown" class="text-center">
-                        <div class="text-8xl font-bold text-red-600 animate-pulse" x-text="countdownValue"></div>
-                        <div class="text-xl text-gray-600 mt-4">Get ready...</div>
-                    </div>
-                    
-                    <!-- Picking Animation -->
-                    <div x-show="isPicking" class="text-center">
-                        <div class="text-4xl font-bold text-blue-600 animate-bounce" x-text="getRandomName()"></div>
-                        <div class="text-lg text-gray-600 mt-4">Picking winner(s)...</div>
-                    </div>
-                    
-                    <!-- Results Display -->
-                    <div x-show="!isPicking && !isCountingDown && lastWinners.length > 0" 
-                         :class="getWinnerDisplayClasses()"
-                         class="w-full text-center">
-                        <template x-for="winner in lastWinners" :key="winner">
-                            <div class="bg-gradient-to-r from-yellow-400 to-yellow-600 text-white p-4 rounded-lg font-bold animate-pulse">
-                                🏆 <span x-text="winner"></span>
-                            </div>
-                        </template>
-                    </div>
-                    
-                    <!-- Empty State -->
-                    <div x-show="!isPicking && !isCountingDown && lastWinners.length === 0 && allNames.length === 0" 
-                         class="text-center text-gray-500">
-                        <div class="text-6xl mb-4">🎲</div>
-                        <div class="text-xl">Add names to get started!</div>
-                    </div>
-                    
-                    <div x-show="!isPicking && !isCountingDown && lastWinners.length === 0 && allNames.length > 0" 
-                         class="text-center text-gray-500">
-                        <div class="text-6xl mb-4">🎯</div>
-                        <div class="text-xl">Ready to pick winner(s)!</div>
-                        <div class="text-sm mt-2">Press SPACE or click the button</div>
-                    </div>
-                    
-                    <!-- Confetti Effect -->
-                    <div x-show="showConfetti" 
-                         class="absolute inset-0 pointer-events-none">
-                        <div class="absolute top-0 left-1/4 text-4xl animate-bounce">🎉</div>
-                        <div class="absolute top-0 right-1/4 text-4xl animate-bounce delay-100">🎊</div>
-                        <div class="absolute bottom-0 left-1/3 text-4xl animate-bounce delay-200">✨</div>
-                        <div class="absolute bottom-0 right-1/3 text-4xl animate-bounce delay-300">🎈</div>
-                    </div>
-                </div>
-                
-                <!-- Quick Actions -->
-                <div x-show="allNames.length > 0" class="flex gap-4">
-                    <button @click="availableNames = [...allNames]; lastWinners = []; saveStateToLocalStorage()" 
-                            class="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700">
-                        🔄 Reset Available
-                    </button>
-                    <button @click="allNames = []; availableNames = []; winners = []; lastWinners = []; selectionHistory = {}; saveStateToLocalStorage()" 
-                            class="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700"
-                            onclick="return confirm('Clear all data?')">
-                        🗑️ Clear All
-                    </button>
-                </div>
-            </div>
+        <div class="mt-4">
+          <h3 class="font-semibold mb-1">Settings</h3>
+          <label class="block mb-1"># Winners: <input type="number" x-model.number="numWinners" min="1" class="w-16 p-1 border rounded"></label>
+          <label class="block mb-1">Shuffle Duration: <input type="number" x-model.number="shuffleDuration" min="0" class="w-16 p-1 border rounded"></label>
+          <label class="block mb-1">Countdown Duration: <input type="number" x-model.number="countdownDuration" min="0" class="w-16 p-1 border rounded"></label>
+          <label class="flex items-center"><input type="checkbox" x-model="removeAfterPicking" class="mr-2"> Remove After Picking</label>
         </div>
-        
-        <!-- History Sheet Overlay -->
-        <div x-show="isHistorySheetOpen" 
-             @click.self="isHistorySheetOpen = false"
-             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div class="bg-white rounded-lg p-6 max-w-2xl w-full max-h-96 overflow-y-auto m-4">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-2xl font-bold text-gray-800">Winner History</h2>
-                    <button @click="isHistorySheetOpen = false" 
-                            class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-                </div>
-                
-                <div x-show="getHistoryEntries().length === 0" class="text-center text-gray-500 py-8">
-                    No winners selected yet!
-                </div>
-                
-                <div class="space-y-4">
-                    <template x-for="(entry, index) in getHistoryEntries()" :key="index">
-                        <div class="border border-gray-200 rounded-lg p-4">
-                            <div class="text-sm text-gray-500 mb-2" x-text="entry.timestamp"></div>
-                            <div class="flex flex-wrap gap-2">
-                                <template x-for="winner in entry.winners" :key="winner">
-                                    <span class="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-sm font-medium" x-text="winner"></span>
-                                </template>
-                            </div>
-                        </div>
-                    </template>
-                </div>
+
+        <div class="mt-4">
+          <h3 class="font-semibold">Groups</h3>
+          <input x-model="newGroupName" placeholder="New group name" class="w-full p-1 border rounded mb-1">
+          <button @click="handleSaveGroup()" class="w-full bg-green-500 text-white p-1 rounded mb-2">Save Group</button>
+          <template x-for="(grp, name) in savedGroups" :key="name">
+            <div class="flex justify-between items-center mb-1">
+              <span x-text="name" class="cursor-pointer" @click="handleLoadGroup(name)"></span>
+              <button @click="handleDeleteGroup(name)" class="text-red-500">&times;</button>
             </div>
+          </template>
         </div>
-        
-        <!-- Presentation Mode Overlay -->
-        <div x-show="isPresentationMode" 
-             class="fixed inset-0 bg-black text-white flex items-center justify-center z-50">
-            
-            <!-- Countdown in Presentation Mode -->
-            <div x-show="isCountingDown" class="text-center">
-                <div class="text-9xl font-bold text-red-400 animate-pulse" x-text="countdownValue"></div>
-                <div class="text-4xl mt-8">Get ready...</div>
-            </div>
-            
-            <!-- Animation in Presentation Mode -->
-            <div x-show="isPicking" class="text-center">
-                <div class="text-8xl font-bold text-blue-400 animate-bounce" x-text="getRandomName()"></div>
-                <div class="text-3xl mt-8">Picking winner(s)...</div>
-            </div>
-            
-            <!-- Winners in Presentation Mode -->
-            <div x-show="!isPicking && !isCountingDown && lastWinners.length > 0" 
-                 :class="getWinnerDisplayClasses().replace('text-4xl md:text-6xl', 'text-6xl md:text-8xl').replace('text-2xl md:text-3xl', 'text-4xl md:text-5xl').replace('text-lg md:text-xl', 'text-2xl md:text-3xl')"
-                 class="w-full text-center px-8">
-                <template x-for="winner in lastWinners" :key="winner">
-                    <div class="bg-gradient-to-r from-yellow-400 to-yellow-600 p-8 rounded-2xl font-bold animate-pulse">
-                        🏆 <span x-text="winner"></span>
-                    </div>
-                </template>
-            </div>
-            
-            <!-- Instructions -->
-            <div class="absolute bottom-8 left-1/2 transform -translate-x-1/2 text-center text-gray-400">
-                <div>SPACE: Pick Winners • ESC: Exit Presentation</div>
-            </div>
+      </div>
+
+      <!-- Right Panel: Picker & Results -->
+      <div class="md:w-2/3 bg-white p-4 rounded-lg shadow relative">
+        <div class="flex justify-between items-center mb-4">
+          <button @click="startPickingProcess()" class="bg-purple-500 text-white px-4 py-2 rounded" :disabled="isCountingDown || isPicking">Pick Winner(s)</button>
+          <div>
+            <button @click="enterPresentationMode()" class="bg-indigo-500 text-white px-2 py-1 rounded mr-2">Presentation Mode</button>
+            <button @click="isHistorySheetOpen = true" class="bg-gray-300 px-2 py-1 rounded">View History</button>
+          </div>
         </div>
+
+        <!-- Countdown -->
+        <div x-show="isCountingDown" class="text-center text-4xl font-bold">{{ countdownValue }}</div>
+
+        <!-- Shuffle Animation -->
+        <div x-show="isPicking" class="text-center text-3xl font-mono animate-pulse">
+          <template x-for="i in numWinners" :key="i">
+            <div x-text="availableNames[Math.floor(Math.random() * availableNames.length)]" class="mb-2"></div>
+          </template>
+        </div>
+
+        <!-- Results -->
+        <div x-show="!isCountingDown && !isPicking">
+          <div :class="{
+            'flex flex-col text-3xl font-bold': lastWinners.length <=4,
+            'grid grid-cols-2 gap-2 text-2xl': lastWinners.length >4 && lastWinners.length <=9,
+            'grid grid-cols-4 gap-1 text-xl': lastWinners.length >9
+          }">
+            <template x-for="winner in lastWinners" :key="winner">
+              <div class="bg-green-100 p-2 rounded text-center" x-text="winner"></div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Confetti -->
+        <div x-show="showConfetti" class="absolute inset-0 pointer-events-none">
+          <!-- placeholder for confetti animation -->
+        </div>
+
+        <!-- History Sheet -->
+        <div x-show="isHistorySheetOpen" class="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center">
+          <div class="bg-white w-3/4 h-3/4 p-4 rounded overflow-auto">
+            <h3 class="text-xl font-semibold mb-2">Selection History</h3>
+            <button @click="isHistorySheetOpen=false" class="absolute top-4 right-4 text-red-500">&times;</button>
+            <template x-for="(names, time) in Object.entries(selectionHistory).reverse()" :key="time">
+              <div class="mb-2">
+                <div class="font-semibold" x-text="new Date(time).toLocaleString()"></div>
+                <ul class="list-disc ml-5">
+                  <template x-for="n in names" :key="n"><li x-text="n"></li></template>
+                </ul>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Presentation Overlay -->
+        <div x-show="isPresentationMode" @keydown.window.escape.prevent="exitPresentationMode()" @keydown.window.space.prevent="startPickingProcess()" class="fixed inset-0 bg-white flex flex-col justify-center items-center">
+          <template x-if="isCountingDown">
+            <div class="text-6xl font-bold" x-text="countdownValue"></div>
+          </template>
+          <template x-if="!isCountingDown">
+            <div :class="{
+              'flex flex-col text-6xl font-bold': lastWinners.length <=4,
+              'grid grid-cols-2 gap-4 text-5xl': lastWinners.length >4 && lastWinners.length <=9,
+              'grid grid-cols-4 gap-2 text-4xl': lastWinners.length >9
+            }">
+              <template x-for="winner in lastWinners" :key="winner">
+                <div x-text="winner" class="p-4"></div>
+              </template>
+            </div>
+          </template>
+        </div>
+
+      </div>
     </div>
+  </div>
 </body>
 </html>
