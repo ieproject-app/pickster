@@ -1,8 +1,7 @@
-// --- Pickster: Random Name Picker App ---
-// Author: ieproject-app (2025)
+// Pickster - Random Name Picker with Fisher-Yates Shuffle (lodash version)
+// Author: ieproject-app
 
 (() => {
-  // --- DOM Elements ---
   const $ = sel => document.querySelector(sel);
   const $$ = sel => document.querySelectorAll(sel);
 
@@ -56,11 +55,11 @@
   const presWinners = $('#presentation-winners');
 
   // --- State ---
-  let names = [];            // all names in current list
-  let availableNames = [];   // names available for picking
-  let pickedNames = [];      // names already picked
-  let history = [];          // {winners: [names], date: Date}
-  let groups = {};           // {groupName: [names]}
+  let names = [];            
+  let availableNames = [];   
+  let pickedNames = [];      
+  let history = [];          
+  let groups = {};           
   let userSettings = {
     numWinners: 1,
     animDuration: 3,
@@ -70,7 +69,6 @@
     sound: true,
   };
 
-  // --- Storage Keys ---
   const STORAGE_KEYS = {
     names: 'pickster-names',
     available: 'pickster-available',
@@ -80,7 +78,6 @@
     settings: 'pickster-settings'
   };
 
-  // --- Utility Functions ---
   function saveState() {
     localStorage.setItem(STORAGE_KEYS.names, JSON.stringify(names));
     localStorage.setItem(STORAGE_KEYS.available, JSON.stringify(availableNames));
@@ -109,12 +106,8 @@
       textarea.value = '';
     }
   }
-  function toTitleCase(str) {
-    return str.replace(/\w\S*/g, txt =>
-      txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-  }
 
-  // --- Tab Switch ---
+  // Tab Switch
   tabNew.onclick = () => {
     tabNew.classList.add('active');
     tabSaved.classList.remove('active');
@@ -129,12 +122,12 @@
     renderSavedGroups();
   };
 
-  // --- Accordion Settings ---
+  // Accordion
   settingsToggle.onclick = () => {
     settingsToggle.parentElement.classList.toggle('open');
   };
 
-  // --- Dropdown More Actions ---
+  // Dropdown More Actions
   moreActionsBtn.onclick = (e) => {
     e.stopPropagation();
     moreActionsBtn.parentElement.classList.toggle('open');
@@ -143,10 +136,10 @@
     if (!moreActionsBtn.contains(e.target)) moreActionsBtn.parentElement.classList.remove('open');
   };
 
-  // --- Input: Set List Button ---
+  // Set List Button (use lodash uniq)
   setListBtn.onclick = () => {
     const raw = textarea.value.split('\n').map(x=>x.trim()).filter(Boolean);
-    const uniq = Array.from(new Set(raw));
+    const uniq = _.uniq(raw);
     names = uniq;
     availableNames = [...uniq];
     pickedNames = [];
@@ -156,7 +149,7 @@
     renderSavedGroups();
   };
 
-  // --- Settings Inputs ---
+  // Settings Inputs
   numWinners.onchange = () => {
     userSettings.numWinners = Math.max(1, parseInt(numWinners.value)||1);
     numWinners.value = userSettings.numWinners;
@@ -177,7 +170,7 @@
     saveState();
   };
 
-  // --- More Actions ---
+  // More Actions
   exportTxt.onclick = () => {
     const blob = new Blob([names.join('\n')], {type: 'text/plain'});
     const a = document.createElement('a');
@@ -201,7 +194,7 @@
     resetAll(true);
   };
 
-  // --- Saved Groups ---
+  // Saved Groups
   function renderSavedGroups() {
     savedGroupsList.innerHTML = '';
     const keys = Object.keys(groups);
@@ -233,7 +226,6 @@
       savedGroupsList.appendChild(row);
     });
   }
-  // Save current list as group (double-click on tab for shortcut)
   tabSaved.ondblclick = () => {
     const groupName = prompt('Group name? (for current list)');
     if (groupName && names.length) {
@@ -244,14 +236,14 @@
     }
   };
 
-  // --- Stats Panel ---
+  // Stats Panel
   function renderStats() {
     statTotal.textContent = names.length;
     statPicked.textContent = pickedNames.length;
     statAvailable.textContent = availableNames.length;
   }
 
-  // --- Winner Display ---
+  // Winner Display
   function renderWinners(winners) {
     winnersDisplay.innerHTML = '';
     winners.forEach(name => {
@@ -262,32 +254,32 @@
     });
   }
 
-  // --- Pick Winner(s) ---
+  // --- Fisher-Yates Shuffle with lodash
+  function pickRandom(arr, n) {
+    return _.shuffle(arr).slice(0, n); // shuffle dengan Fisher-Yates dari lodash
+  }
+
+  // Pick Winner(s)
   pickBtn.onclick = async () => {
     if (!names.length) return alert('Please set a list first!');
     if (!availableNames.length) return alert('No available names!');
     if (userSettings.numWinners > availableNames.length)
       return alert('Not enough names left!');
-
     await doPick('normal');
   };
 
-  // --- AI Suggest ---
+  // AI Suggest
   aiSuggestBtn.onclick = async () => {
     if (!names.length) return alert('Set a list first!');
     if (!availableNames.length) return alert('No names left!');
     await doPick('ai');
   };
 
-  // --- Core Pick Logic ---
+  // Core Pick Logic
   async function doPick(type='normal') {
-    // Display countdown
     await showCountdown(userSettings.countdownDuration, countdownDiv, true);
-
-    // Animation: flickering names
     await showAnimation(userSettings.animDuration, animationDiv, availableNames);
 
-    // Pick winners (normal or AI)
     let winners = [];
     if (type==='normal') {
       winners = pickRandom(availableNames, userSettings.numWinners);
@@ -295,18 +287,12 @@
       winners = aiSuggest(userSettings.numWinners);
     }
 
-    // Display winners
     renderWinners(winners);
-
-    // Play winner sound
     if (userSettings.sound) playWinSound();
-
-    // Save history
     history.push({
       winners, date: new Date().toISOString()
     });
 
-    // Mark picked
     pickedNames = pickedNames.concat(winners);
     if (userSettings.removeAfterPick) {
       availableNames = availableNames.filter(n => !winners.includes(n));
@@ -316,7 +302,7 @@
     renderStats();
   }
 
-  // --- Utility: Show Countdown ---
+  // Show Countdown
   async function showCountdown(sec, targetDiv, playSound) {
     targetDiv.innerHTML = '';
     for (let i = sec; i > 0; i--) {
@@ -327,13 +313,15 @@
     targetDiv.textContent = '';
   }
 
-  // --- Utility: Show Animation (pick) ---
+  // Show Animation (pakai shuffle lodash juga biar variasi)
   async function showAnimation(duration, targetDiv, pool) {
     let t0 = Date.now();
     targetDiv.innerHTML = '';
     let tick = 0;
+    let shuffled = _.shuffle(pool);
     while (Date.now() - t0 < duration * 1000) {
-      const name = pool[Math.floor(Math.random() * pool.length)];
+      if (tick % pool.length === 0) shuffled = _.shuffle(pool);
+      const name = shuffled[tick % pool.length];
       targetDiv.textContent = name;
       tick++;
       await sleep(Math.max(60, 120 - 10 * Math.min(tick, 10)));
@@ -341,31 +329,14 @@
     targetDiv.textContent = '';
   }
 
-  // --- Utility: Pick Randomly ---
-  function pickRandom(arr, n) {
-    let copy = [...arr];
-    let res = [];
-    for (let i = 0; i < n && copy.length; i++) {
-      let idx = Math.floor(Math.random() * copy.length);
-      res.push(copy[idx]);
-      copy.splice(idx,1);
-    }
-    return res;
-  }
-
-  // --- AI Suggestion (Fairness) ---
+  // AI Suggestion (Fairness)
   function aiSuggest(n=1) {
-    // Find names with fewest wins
-    // Build win counts
     const counts = {};
     names.forEach(name => { counts[name] = 0; });
     history.forEach(h => h.winners.forEach(w => counts[w] = (counts[w]||0)+1));
-    // Only available names
     let minWin = Math.min(...availableNames.map(name=>counts[name]));
     let fairPool = availableNames.filter(name=>counts[name] === minWin);
-    // Pick randomly among the fairest
-    let suggestion = pickRandom(fairPool, n);
-    // Show confirm modal
+    let suggestion = _.shuffle(fairPool).slice(0, n);
     showModal(`<h2>AI Suggestion</h2>
       <p>The fairest candidates (fewest wins):</p>
       <div style="display:flex;gap:12px;margin:8px 0 17px 0;">
@@ -395,14 +366,7 @@
     return suggestion;
   }
 
-  // --- Stats, Winners, and All ---
-  function renderAll() {
-    renderStats();
-    renderWinners([]);
-    renderSavedGroups();
-  }
-
-  // --- Modal Dialog ---
+  // Modal Dialog
   function showModal(html) {
     modalBody.innerHTML = html;
     modalOverlay.classList.remove('hidden');
@@ -416,7 +380,7 @@
     if (e.target === modalOverlay) closeModal();
   };
 
-  // --- View History Modal ---
+  // View History Modal
   viewHistoryBtn.onclick = () => {
     if (!history.length) return alert('No history yet!');
     let html = `<h2>History</h2><ol>`;
@@ -428,7 +392,7 @@
     showModal(html);
   };
 
-  // --- Theme Toggle ---
+  // Theme Toggle
   function setTheme(theme) {
     document.body.classList.toggle('dark', theme==='dark');
     userSettings.theme = theme;
@@ -440,7 +404,7 @@
     setTheme(newTheme);
   };
 
-  // --- Sound Toggle ---
+  // Sound Toggle
   function setSound(on) {
     userSettings.sound = !!on;
     soundBtn.querySelector('span').className = on ? 'icon-sound-on' : 'icon-sound-off';
@@ -448,7 +412,7 @@
   }
   soundBtn.onclick = () => setSound(!userSettings.sound);
 
-  // --- Presentation Mode ---
+  // Presentation Mode
   presBtn.onclick = () => enterPresentationMode();
   function enterPresentationMode() {
     presView.classList.remove('hidden');
@@ -456,7 +420,6 @@
     presAnimation.textContent = '';
     presWinners.innerHTML = '';
     presView.requestFullscreen && presView.requestFullscreen();
-    // Listen for key: Escape (exit), Space (pick)
     document.addEventListener('keydown', presKeyHandler);
   }
   function exitPresentationMode() {
@@ -468,7 +431,6 @@
     if (e.key === 'Escape') {
       exitPresentationMode();
     } else if (e.key === ' ' || e.key === 'Spacebar') {
-      // Pick in presentation mode
       await showCountdown(userSettings.countdownDuration, presCountdown, true);
       await showAnimation(userSettings.animDuration, presAnimation, availableNames);
       const winners = pickRandom(availableNames, userSettings.numWinners);
@@ -490,7 +452,7 @@
   }
   presView.onclick = exitPresentationMode;
 
-  // --- Web Audio API: Sound ---
+  // Web Audio API: Sound
   function playTickSound() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -522,10 +484,9 @@
     } catch {}
   }
 
-  // --- Helper: Sleep ---
   function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
 
-  // --- Initialize ---
+  // Initialize
   function applySettingsToInputs() {
     numWinners.value = userSettings.numWinners;
     animDuration.value = userSettings.animDuration;
@@ -533,6 +494,12 @@
     removeAfterPick.checked = !!userSettings.removeAfterPick;
     setTheme(userSettings.theme);
     setSound(userSettings.sound);
+  }
+
+  function renderAll() {
+    renderStats();
+    renderWinners([]);
+    renderSavedGroups();
   }
 
   function firstLoad() {
@@ -543,7 +510,6 @@
   }
   firstLoad();
 
-  // --- Save before unload ---
   window.addEventListener('beforeunload', saveState);
 
 })();
